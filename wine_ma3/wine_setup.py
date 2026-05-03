@@ -1,0 +1,370 @@
+"""Wine prefix, patch, and launcher generation."""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
+from .installers import MaInstaller
+from .system import run
+
+
+WINTRUST_C = r"""#include <stdarg.h>
+#include <windef.h>
+#include <winbase.h>
+#include <wintrust.h>
+
+LONG WINAPI WinVerifyTrust(HWND hwnd, GUID *action_id, LPVOID data)
+{
+    SetLastError(ERROR_SUCCESS);
+    return ERROR_SUCCESS;
+}
+
+HRESULT WINAPI WinVerifyTrustEx(HWND hwnd, GUID *action_id, WINTRUST_DATA *data)
+{
+    SetLastError(ERROR_SUCCESS);
+    return S_OK;
+}
+"""
+
+WINTRUST_DEF = """LIBRARY wintrust.dll
+EXPORTS
+    WinVerifyTrust
+    WinVerifyTrustEx
+"""
+
+TERMINAL_CFG = bytes.fromhex(
+    "02 00 00 00 7f 00 00 01"
+    " 00 00 00 00 00 00 00 00"
+    " 00 00 00 00 00 00 00 00"
+    " 00 00 00 00"
+)
+
+
+def prefix_path(installer: MaInstaller) -> Path:
+    return Path.home() / installer.prefix_name
+
+
+def wine_env(prefix: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    runtime_dir = env.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    env.update(
+        {
+            "DISPLAY": env.get("DISPLAY", ":0"),
+            "XDG_RUNTIME_DIR": runtime_dir,
+            "DBUS_SESSION_BUS_ADDRESS": env.get("DBUS_SESSION_BUS_ADDRESS", f"unix:path={runtime_dir}/bus"),
+            "WINEPREFIX": str(prefix),
+            "WINEARCH": "win64",
+            "LANG": "en_US.UTF-8",
+            "LC_ALL": "en_US.UTF-8",
+            "MESA_GL_VERSION_OVERRIDE": "4.2",
+            "MESA_GLSL_VERSION_OVERRIDE": "420",
+            "DXVK_LOG_LEVEL": "info",
+            "DXVK_LOG_PATH": str(Path.home() / "ma3-wine-tests" / "2.3.2-clean" / "dxvk"),
+        }
+    )
+    return env
+
+
+def runtime_wine_env(prefix: Path) -> dict[str, str]:
+    env = wine_env(prefix)
+    env["WINEDLLOVERRIDES"] = "wintrust=n,b;dxgi,d3d11=n"
+    return env
+
+
+def install_prefix(installer: MaInstaller, repo_root: Path, *, run_installer: bool = True) -> None:
+    prefix = prefix_path(installer)
+    setup_env = wine_env(prefix)
+    installer_exe = installer.resolve_exe(repo_root)
+    if prefix_initialized(prefix) and not prefix_usable(setup_env):
+        backup = prefix.with_name(f"{prefix.name}.broken.{_timestamp()}")
+        shutil.move(str(prefix), str(backup))
+    if not prefix_initialized(prefix):
+        run(["wineboot", "-u"], check=True, env=setup_env)
+    if run_installer:
+        run(["wine", "start", "/wait", "/unix", str(installer_exe), "/S"], check=True, env=setup_env)
+
+    if not ma_version_installed(installer):
+        raise RuntimeError(f"grandMA3 {installer.version} was not found after running the MA installer")
+    seed_terminal_config(installer)
+    create_launchers(installer)
+
+    install_dxvk(setup_env)
+    build_and_install_wintrust(prefix, setup_env)
+    run(
+        ["wine", "reg", "add", r"HKCU\Software\Wine\DllOverrides", "/v", "*wintrust", "/t", "REG_SZ", "/d", "native,builtin", "/f"],
+        check=True,
+        env=runtime_wine_env(prefix),
+    )
+    create_launchers(installer)
+
+
+def install_dxvk(env: dict[str, str]) -> None:
+    attempts: list[str] = []
+    if shutil.which("winetricks"):
+        if _try_dxvk_command(["winetricks", "-q", "dxvk"], env, attempts):
+            return
+    if shutil.which("dxvk-setup"):
+        if _try_dxvk_command(["dxvk-setup", "install"], env, attempts):
+            return
+    if not attempts:
+        raise RuntimeError("DXVK setup requires either winetricks or Debian's dxvk-setup")
+    raise RuntimeError("DXVK setup failed:\n\n" + "\n\n".join(attempts))
+
+
+def _try_dxvk_command(command: list[str], env: dict[str, str], attempts: list[str]) -> bool:
+    try:
+        result = run(command, check=True, capture=True, env=env)
+    except subprocess.CalledProcessError as exc:
+        output = (exc.stdout or "").strip() or "<no output>"
+        attempts.append(f"$ {' '.join(command)}\nexit {exc.returncode}\n{output}")
+        return False
+    output = (result.stdout or "").strip()
+    if output:
+        attempts.append(f"$ {' '.join(command)}\n{output}")
+    return True
+
+
+def prefix_initialized(prefix: Path) -> bool:
+    return (prefix / "system.reg").exists() and (prefix / "drive_c/windows").exists()
+
+
+def prefix_usable(env: dict[str, str]) -> bool:
+    result = run(["wine", "cmd", "/c", "ver"], capture=True, env=env)
+    return result.returncode == 0
+
+
+def ma_version_installed(installer: MaInstaller) -> bool:
+    bin_dir = (
+        prefix_path(installer)
+        / "drive_c/Program Files/MALightingTechnology"
+        / installer.install_dir_name
+        / "bin"
+    )
+    return (bin_dir / "app_system.exe").exists()
+
+
+def seed_terminal_config(installer: MaInstaller) -> None:
+    cfg = (
+        prefix_path(installer)
+        / "drive_c/ProgramData/MALightingTechnology"
+        / installer.install_dir_name
+        / "terminalapp/config/terminal.cfg"
+    )
+    if cfg.exists():
+        return
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_bytes(TERMINAL_CFG)
+
+
+def build_and_install_wintrust(prefix: Path, env: dict[str, str]) -> None:
+    if shutil.which("x86_64-w64-mingw32-gcc") is None:
+        raise RuntimeError("x86_64-w64-mingw32-gcc is required to build wintrust.dll")
+    build_dir = Path.home() / ".cache" / "winema3" / "wintrust"
+    build_dir.mkdir(parents=True, exist_ok=True)
+    c_path = build_dir / "wintrust_stub.c"
+    def_path = build_dir / "wintrust_stub.def"
+    dll_path = build_dir / "wintrust-native.dll"
+    c_path.write_text(WINTRUST_C, encoding="utf-8")
+    def_path.write_text(WINTRUST_DEF, encoding="utf-8")
+    run(
+        ["x86_64-w64-mingw32-gcc", "-shared", "-o", str(dll_path), str(c_path), str(def_path), "-Wl,--kill-at"],
+        check=True,
+        env=env,
+    )
+    target = prefix / "drive_c/windows/system32/wintrust.dll"
+    if target.exists() and not any(target.parent.glob("wintrust.dll.winebak.*")):
+        backup = target.with_name(f"wintrust.dll.winebak.{_timestamp()}")
+        shutil.copy2(target, backup)
+    shutil.copy2(dll_path, target)
+
+
+def _timestamp() -> str:
+    import datetime as _dt
+
+    return _dt.datetime.now().strftime("%Y%m%d%H%M%S")
+
+
+def create_launchers(installer: MaInstaller) -> None:
+    prefix = prefix_path(installer)
+    bin_dir = prefix / "drive_c/Program Files/MALightingTechnology" / installer.install_dir_name / "bin"
+    local_bin = Path.home() / ".local/bin"
+    local_bin.mkdir(parents=True, exist_ok=True)
+    (local_bin / "gma3").write_text(_launcher(installer, "app_system.exe HOSTTYPE=onPC", "run"), encoding="utf-8")
+    (local_bin / "gma3term").write_text(_launcher(installer, 'app_terminal.exe "$@"', "terminal"), encoding="utf-8")
+    (local_bin / "gma3").chmod(0o755)
+    (local_bin / "gma3term").chmod(0o755)
+    _create_fish_helpers()
+    _create_desktop_file(bin_dir)
+
+
+def _launcher(installer: MaInstaller, wine_command: str, log_name: str) -> str:
+    prefix = f'$HOME/{installer.prefix_name}'
+    return f"""#!/usr/bin/env bash
+set -u
+
+export DISPLAY="${{DISPLAY:-:0}}"
+export XDG_RUNTIME_DIR="${{XDG_RUNTIME_DIR:-/run/user/$(id -u)}}"
+export DBUS_SESSION_BUS_ADDRESS="${{DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}}"
+export WINEPREFIX="{prefix}"
+export LANG=en_US.UTF-8
+export LC_ALL=en_US.UTF-8
+export MESA_GL_VERSION_OVERRIDE=4.2
+export MESA_GLSL_VERSION_OVERRIDE=420
+export WINEDLLOVERRIDES='wintrust=n,b;dxgi,d3d11=n'
+export DXVK_LOG_LEVEL=info
+export DXVK_LOG_PATH="$HOME/ma3-wine-tests/{installer.version}-clean/dxvk"
+
+log="$HOME/malog-gma3-{installer.version}-{log_name}.log"
+bin="$WINEPREFIX/drive_c/Program Files/MALightingTechnology/{installer.install_dir_name}/bin"
+
+mkdir -p "$DXVK_LOG_PATH"
+{{
+  echo "=== gma3 {log_name} {installer.version} launch $(date -Is) ==="
+  echo "WINEPREFIX=$WINEPREFIX"
+  echo "DISPLAY=$DISPLAY"
+  echo "LANG=$LANG LC_ALL=$LC_ALL"
+  wine --version
+}} >> "$log"
+
+cd "$bin" || exit 1
+wine {wine_command}
+rc=$?
+echo "=== gma3 {log_name} {installer.version} exit rc=$rc $(date -Is) ===" >> "$log"
+exit "$rc"
+"""
+
+
+def _create_fish_helpers() -> None:
+    fish_dir = Path.home() / ".config/fish/functions"
+    if shutil.which("fish") is None and not fish_dir.exists():
+        return
+    fish_dir.mkdir(parents=True, exist_ok=True)
+    (fish_dir / "gma3.fish").write_text("function gma3\n    command $HOME/.local/bin/gma3 $argv\nend\n", encoding="utf-8")
+    (fish_dir / "gma3term.fish").write_text("function gma3term\n    command $HOME/.local/bin/gma3term $argv\nend\n", encoding="utf-8")
+
+
+def _create_desktop_file(bin_dir: Path) -> None:
+    _remove_wine_ma_desktop_files()
+    exec_command = _terminal_exec(bin_dir) or str(Path.home() / ".local/bin/gma3")
+    icon = _desktop_icon()
+    desktop = f"""[Desktop Entry]
+Name=grandMA3
+Exec={exec_command}
+Type=Application
+Terminal=false
+StartupNotify=true
+Comment=Start grandMA3 onPC via WineMA3
+Path={bin_dir}
+Icon={icon}
+StartupWMClass=app_system.exe
+Categories=AudioVideo;Utility;
+X-GNOME-FullName=grandMA3
+"""
+    app_dir = Path.home() / ".local/share/applications"
+    app_dir.mkdir(parents=True, exist_ok=True)
+    app_file = app_dir / "grandMA3.desktop"
+    old_app_file = app_dir / "grandMA3-onPC.desktop"
+    old_app_file.unlink(missing_ok=True)
+    _write_desktop_file(app_file, desktop)
+    desktop_dir = Path.home() / "Desktop"
+    if desktop_dir.exists():
+        old_desktop_file = desktop_dir / "grandMA3 onPC.desktop"
+        old_desktop_file.unlink(missing_ok=True)
+        _write_desktop_file(desktop_dir / "grandMA3.desktop", desktop)
+
+    if shutil.which("update-desktop-database"):
+        run(["update-desktop-database", str(app_dir)])
+
+
+def _write_desktop_file(path: Path, content: str) -> None:
+    path.write_text(content, encoding="utf-8")
+    path.chmod(0o755)
+    if shutil.which("gio"):
+        run(["gio", "set", str(path), "metadata::trusted", "true"])
+
+
+def _terminal_exec(bin_dir: Path) -> str | None:
+    launcher = str(Path.home() / ".local/bin/gma3")
+    quoted_bin = _desktop_arg(str(bin_dir))
+    quoted_launcher = _desktop_arg(launcher)
+    candidates = [
+        ("ptyxis", f"ptyxis --new-window --working-directory={quoted_bin} -- {quoted_launcher}"),
+        ("gnome-terminal", f"gnome-terminal --working-directory={quoted_bin} -- {quoted_launcher}"),
+        ("kgx", f"kgx --working-directory={quoted_bin} -- {quoted_launcher}"),
+        ("gnome-console", f"gnome-console --working-directory={quoted_bin} -- {quoted_launcher}"),
+        ("xfce4-terminal", f"xfce4-terminal --working-directory={quoted_bin} --command={quoted_launcher}"),
+        ("konsole", f"konsole --workdir {quoted_bin} -e {quoted_launcher}"),
+        ("mate-terminal", f"mate-terminal --working-directory={quoted_bin} -x {quoted_launcher}"),
+        ("tilix", f"tilix --working-directory={quoted_bin} -e {quoted_launcher}"),
+        ("alacritty", f"alacritty --working-directory {quoted_bin} -e {quoted_launcher}"),
+        ("xterm", f"xterm -e {quoted_launcher}"),
+    ]
+    for binary, command in candidates:
+        if shutil.which(binary):
+            return command
+    return None
+
+
+def _desktop_arg(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _desktop_icon() -> str:
+    if _icon_theme_has("8254_app_system.0"):
+        return "8254_app_system.0"
+    if _install_fallback_icon():
+        return "winema3-grandma3"
+    return "applications-graphics"
+
+
+def _install_fallback_icon() -> bool:
+    source = Path(__file__).resolve().parent.parent / "assets/winema3-grandma3.svg"
+    if not source.exists():
+        return False
+    target = Path.home() / ".local/share/icons/hicolor/scalable/apps/winema3-grandma3.svg"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)
+    icon_theme = Path.home() / ".local/share/icons/hicolor"
+    if shutil.which("gtk-update-icon-cache") and (icon_theme / "index.theme").exists():
+        run(["gtk-update-icon-cache", "-q", str(icon_theme)])
+    return True
+
+
+def _icon_theme_has(icon_name: str) -> bool:
+    icon_dirs = [
+        Path.home() / ".local/share/icons",
+        Path.home() / ".icons",
+        Path("/usr/share/icons"),
+        Path("/usr/local/share/icons"),
+    ]
+    suffixes = (".png", ".svg", ".xpm")
+    for icon_dir in icon_dirs:
+        if not icon_dir.exists():
+            continue
+        for suffix in suffixes:
+            if any(icon_dir.rglob(f"{icon_name}{suffix}")):
+                return True
+    return False
+
+
+def _remove_wine_ma_desktop_files() -> None:
+    app_dir = Path.home() / ".local/share/applications"
+    wine_programs = app_dir / "wine/Programs"
+    if wine_programs.exists():
+        for desktop_file in wine_programs.rglob("*.desktop"):
+            try:
+                text = desktop_file.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            if "grandMA3" in text or "MALightingTechnology" in text or "MA Lighting" in text:
+                desktop_file.unlink(missing_ok=True)
+
+        for directory in sorted(wine_programs.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+            if directory.is_dir():
+                try:
+                    directory.rmdir()
+                except OSError:
+                    pass

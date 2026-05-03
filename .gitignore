@@ -1,0 +1,23 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# MA installers and extracted payloads are large/licensed user-provided files.
+ma3onpcinstaller/*
+!ma3onpcinstaller/.gitkeep
+ma3onpcinstaller/.extracted/
+*.exe
+*.zip
+*.msi
+
+# Generated local artifacts.
+*.dll
+*.log
+*.tmp
+build/
+dist/
+.venv/
+wineprefixes/
