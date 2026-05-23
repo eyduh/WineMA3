@@ -101,6 +101,12 @@ def install_prefix(installer: MaInstaller, repo_root: Path, *, run_installer: bo
     create_launchers(installer)
 
 
+def _is_nixos() -> bool:
+    from .system import read_os_release
+    os_release = read_os_release()
+    return "nixos" in f"{os_release.get('ID', '')} {os_release.get('ID_LIKE', '')}".lower()
+
+
 def install_dxvk(env: dict[str, str]) -> None:
     attempts: list[str] = []
     if shutil.which("winetricks"):
@@ -109,9 +115,72 @@ def install_dxvk(env: dict[str, str]) -> None:
     if shutil.which("dxvk-setup"):
         if _try_dxvk_command(["dxvk-setup", "install"], env, attempts):
             return
+    if _is_nixos():
+        dxvk_path = _find_nixos_dxvk()
+        if dxvk_path:
+            _install_dxvk_from_path(dxvk_path, env)
+            return
+        attempts.append("NixOS: DXVK_PATH not found in environment and no dxvk package in PATH")
     if not attempts:
         raise RuntimeError("DXVK setup requires either winetricks or Debian's dxvk-setup")
     raise RuntimeError("DXVK setup failed:\n\n" + "\n\n".join(attempts))
+
+
+def _find_nixos_dxvk() -> Path | None:
+    import os
+    env_path = os.environ.get("DXVK_PATH")
+    if env_path and Path(env_path).joinpath("x64/d3d11.dll").exists():
+        return Path(env_path)
+    # Search PATH for dxvk package directory
+    for p in os.environ.get("PATH", "").split(":"):
+        if "dxvk" in p and Path(p).joinpath("x64/d3d11.dll").exists():
+            return Path(p)
+    # Search nix store as fallback
+    try:
+        import subprocess as sp
+        result = sp.run(
+            ["find", "/nix/store", "-maxdepth", "1", "-name", "*dxvk*", "-type", "d"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in result.stdout.strip().split("\n"):
+            d = Path(line)
+            if d.joinpath("x64/d3d11.dll").exists():
+                return d
+    except Exception:
+        pass
+    return None
+
+
+def _install_dxvk_from_path(dxvk_path: Path, env: dict[str, str]) -> None:
+    prefix = Path(env.get("WINEPREFIX", Path.home() / ".wine"))
+    system32 = prefix / "drive_c/windows/system32"
+    syswow64 = prefix / "drive_c/windows/syswow64"
+    system32.mkdir(parents=True, exist_ok=True)
+    syswow64.mkdir(parents=True, exist_ok=True)
+
+    x64_dlls = ["d3d11.dll", "dxgi.dll", "d3d10core.dll"]
+    x32_dlls = ["d3d11.dll", "dxgi.dll", "d3d10core.dll"]
+
+    for dll in x64_dlls:
+        src = dxvk_path / "x64" / dll
+        if src.exists():
+            shutil.copy2(src, system32 / dll)
+
+    for dll in x32_dlls:
+        src = dxvk_path / "x32" / dll
+        if src.exists():
+            shutil.copy2(src, syswow64 / dll)
+
+    # Set registry overrides for DXVK DLLs
+    from .system import run as _run
+    _run(
+        ["wine", "reg", "add", r"HKCU\Software\Wine\DllOverrides", "/v", "dxgi", "/t", "REG_SZ", "/d", "native", "/f"],
+        check=False, env=env,
+    )
+    _run(
+        ["wine", "reg", "add", r"HKCU\Software\Wine\DllOverrides", "/v", "d3d11", "/t", "REG_SZ", "/d", "native", "/f"],
+        check=False, env=env,
+    )
 
 
 def _try_dxvk_command(command: list[str], env: dict[str, str], attempts: list[str]) -> bool:
