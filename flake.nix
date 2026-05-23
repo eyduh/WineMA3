@@ -59,7 +59,7 @@
             gnugrep
             busybox
             libcap
-            xorg.xset
+            xset
             glib
             desktop-file-utils
             gtk3
@@ -67,7 +67,7 @@
             procps
             pciutils
             vulkan-tools
-            glxinfo
+            mesa-demos
           ];
           shellHook = ''
             export DXVK_PATH="${pkgs.dxvk}/share/dxvk"

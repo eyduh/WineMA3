@@ -18,7 +18,7 @@
 , busybox
 , libcap
 , systemd
-, xorg
+, xset
 , glib
 , desktop-file-utils
 , gtk3
@@ -26,7 +26,7 @@
 , procps
 , pciutils
 , vulkan-tools
-, glxinfo
+, mesa-demos
 }:
 
 let
@@ -51,7 +51,7 @@ let
     busybox
     libcap
     systemd
-    xorg.xset
+    xset
     glib
     desktop-file-utils
     gtk3
@@ -59,7 +59,7 @@ let
     procps
     pciutils
     vulkan-tools
-    glxinfo
+    mesa-demos
   ];
 in
 
@@ -110,7 +110,7 @@ stdenv.mkDerivation {
         procps
         pciutils
         vulkan-tools
-        glxinfo
+        mesa-demos
       ]} \
       --set PYTHONDONTWRITEBYTECODE 1
 
