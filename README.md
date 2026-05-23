@@ -1,184 +1,148 @@
 # WineMA3
 
-WineMA3 is a Wine-only installer for running the Windows grandMA3 onPC build on
-Linux.
+WineMA3 is a Nix-native runner for grandMA3 onPC (professional lighting console
+software from MA Lighting) on Linux. It builds a layered Wine prefix with DXVK
+and a custom wintrust stub, then mounts it via overlayfs at runtime for a clean,
+immutable-base + mutable-upper experience.
 
-This project does **not** use the native grandMA3 Linux installer. It installs the
-Windows onPC build into a dedicated Wine prefix and sets everything up for you.
+Target systems: **NixOS** (primary) and any flake-enabled Nix install on
+`x86_64-linux`.
 
-## Supported Systems
+## Quick Start (1-2-3)
 
-First-version target distros:
+grandMA3 onPC is proprietary software and cannot be redistributed. You must
+provide your own installer.
 
-- Arch / CachyOS / Manjaro-like
-- Debian / Ubuntu-like
-- Fedora-like
-- openSUSE-like
+1. **Download** the grandMA3 onPC Windows installer from
+   [malighting.com](https://www.malighting.com/downloads/).
 
-Unsupported or experimental:
+2. **Prefetch** it into the Nix store:
+   ```bash
+   nix-prefetch-url file:///path/to/grandMA3_onPC_win_vX.Y.Z.W.exe
+   ```
+   This prints a `sha256` hash and adds the file to `/nix/store/`.
 
-- Alpine / musl
-- Flatpak or Snap Wine
-- immutable/containerized systems
-- non-mainstream package managers
+3. **Provide** the hash in `packages/sources.nix` (or via an overlay), then
+   build and run:
+   ```bash
+   nix run .#gma3
+   ```
 
-## Installer File
+## Installation Methods
 
-Download the Windows grandMA3 onPC installer from MA Lighting and place it here:
+### Ephemeral (nix run)
 
-```text
-ma3onpcinstaller/
-```
-
-ZIP and direct EXE installers are both supported:
-
-```text
-ma3onpcinstaller/grandMA3_onPC_win_v2.3.2.0.zip
-ma3onpcinstaller/grandMA3_onPC_win_v2.3.2.0.exe
-```
-
-The installer scans `ma3onpcinstaller/*.exe` and `ma3onpcinstaller/*.zip`. ZIP
-files are probed with Python's built-in ZIP reader. If a ZIP contains an EXE,
-the installer extracts the selected EXE into `ma3onpcinstaller/.extracted/` and
-uses that extracted EXE for the Wine install. If multiple installer candidates
-are present, it shows a Rich selection table and asks which one to install.
-
-## Usage
-
-Run:
-
+Run without installing:
 ```bash
-python3 install.py
+nix run github:eyduh/WineMA3
 ```
 
-If Python Rich is missing, `install.py` asks to install it through the native
-package manager (`python-rich` or `python3-rich`) and then restarts itself.
+### User profile (nix profile)
 
-When debugging an already-installed prefix, skip rerunning the MA installer EXE:
-
+Add to your user profile:
 ```bash
-python3 install.py --noinstall
+nix profile install github:eyduh/WineMA3
 ```
 
-This still refreshes Wine bootstrap state, DXVK, the wintrust override, and
-launchers.
+### NixOS / Home Manager (declarative)
 
-Probe without installing:
+Add the overlay and package to your system configuration:
+```nix
+{
+  inputs.winema3.url = "github:eyduh/WineMA3";
 
+  outputs = { self, nixpkgs, winema3, ... }:
+    let
+      pkgs = import nixpkgs {
+        system = "x86_64-linux";
+        overlays = [ winema3.overlays.default ];
+      };
+    in
+    {
+      # NixOS configuration
+      nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
+        inherit pkgs;
+        modules = [
+          winema3.nixosModules.default
+          {
+            programs.winema3.enable = true;
+            programs.winema3.package = pkgs.winema3;
+          }
+        ];
+      };
+    };
+}
+```
+
+### NixOS Module
+
+Enable the module for automatic firewall rules, wineserver capabilities, and
+power management:
+```nix
+{
+  programs.winema3.enable = true;
+}
+```
+
+This configures:
+- Firewall: UDP `30020`, TCP `30022-30040`, TCP `8080`
+- `security.wrappers.wineserver` with `cap_net_raw=ep`
+- Power management: disables suspend/hibernate and display blanking
+
+## Subcommands
+
+The `winema3-runner` binary (exposed as `gma3`) supports:
+
+- `gma3` (default) — launch grandMA3 onPC
+- `gma3 wine <cmd>` — run any Wine command in the prefix
+- `gma3 winetricks` — run winetricks
+- `gma3 wineboot` — run wineboot
+- `gma3 wineserver` — run wineserver
+- `gma3 probe` — system diagnostics
+
+## Architecture
+
+- **Nix (~57%)** — packaging, Wine prefix derivation, overlayfs setup, NixOS
+  module
+- **Rust (~41%)** — runtime runner (`crates/runner/`): overlayfs mount,
+  XDG paths, Wine proxying, CLI
+- **Python (~2%)** — NixOS VM test script (`tests/gma3.py`)
+
+## Runtime Paths
+
+- Upper (user data): `~/.local/share/gma3/`
+- Workdir: `~/.local/state/gma3/`
+- Runtime mount: `/run/user/<uid>/gma3-prefix-<pid>/`
+
+## Multi-Version Support
+
+The runner uses Cargo feature flags for different grandMA3 versions. The overlay
+exposes versioned packages such as `gma3-v2320`, `gma3-v2330`, etc.
+
+## Troubleshooting
+
+**Overlayfs mount fails**: the runner automatically falls back to
+`fuse-overlayfs`. If both fail, check that your kernel supports user namespaces
+and overlayfs.
+
+**Reset the upperdir** (user data layer):
 ```bash
-python3 probe.py
+rm -rf ~/.local/share/gma3 ~/.local/state/gma3
 ```
 
-Uninstall launchers and optionally Wine prefixes:
+**Switch grandMA3 versions**: change the version in your overlay and rebuild.
+The lowerdir (immutable base prefix) will change, but your upperdir (user data)
+will remain.
 
-```bash
-python3 uninstall.py
-```
+## Technical Notes
 
-## What It Installs
+- Uses stock `wineWow64Packages.full` from nixpkgs (no custom Wine fork)
+- DXVK is provided at runtime via `WINEPATH`, not baked into the prefix
+- `wintrust.dll` stub is cross-compiled with MinGW at build time
+- Registry patches (`wintrust=n,b`, `dxgi=n`, `d3d11=n`) are applied at build
+  time
 
-The installer creates a versioned Wine prefix, for example:
+## License
 
-```text
-~/.wine-gma2320
-```
-
-It installs:
-
-- Wine prefix via `wineboot -u`
-- selected grandMA3 Windows EXE using `/S`
-- DXVK via `winetricks -q dxvk` or Debian's `dxvk-setup install`
-- prefix-local native `wintrust.dll` stub
-- Wine override `*wintrust = native,builtin`
-- `~/.local/bin/gma3`
-- `~/.local/bin/gma3term`
-- fish helpers when fish exists
-- desktop file when a known terminal emulator exists
-
-## Launching
-
-Start onPC:
-
-```bash
-gma3
-```
-
-Open app_terminal:
-
-```bash
-gma3term
-```
-
-Inside `gma3term`, `help` should show:
-
-```text
-SYSMON [ip]
-SYSNOW [ip]
-SHELL [ip]
-CMDLINE [ip]
-```
-
-Do not pipe `gma3term` through `tee` or similar tools. `app_terminal.exe` needs
-direct interactive terminal I/O or typed text may not appear.
-
-## Networking Notes
-
-MA-Net3 uses UDP multicast on port `30020`, commonly in the `236.4.x.x` range.
-Web Remote uses TCP `8080`. Wine MA-Net networking may need:
-
-```bash
-sudo setcap cap_net_raw=ep "$(command -v wineserver)"
-```
-
-The installer asks before applying this.
-
-If UFW, firewalld, nftables.service, or netfilter-persistent is active, the
-installer asks whether to disable host firewalls for a trusted LAN-only MA VM,
-apply MA-Net rules where the backend supports it, or skip firewall changes. It
-never disables a firewall silently.
-
-## Power And Display Management
-
-The installer also asks to disable OS sleep and desktop idle power saving. When
-accepted, it masks systemd sleep targets, writes a systemd sleep.conf drop-in,
-writes an Xorg no-blanking/DPMS drop-in, and installs a per-user autostart
-helper that applies `xset`, GNOME `gsettings`, XFCE `xfconf-query`, and KDE
-PowerDevil/screen-locker settings at login.
-
-This is intended for dedicated MA workstations and show-control VMs where the
-application must stay visible and running without a screen blank, display power
-off, suspend, or lock-screen login prompt interrupting operation. The installer
-does not install third-party caffeine-style tools; it applies the native
-systemd and desktop settings directly and reapplies session-local display
-settings on desktop login.
-
-The current controls cover:
-
-- systemd suspend, sleep, hibernate, hybrid-sleep, and suspend-then-hibernate
-- X11 screen blanking, screensaver timeout, and DPMS display power-off
-- GNOME automatic screen blank, screen lock, idle activation, dimming, and
-  inactive sleep behavior
-- XFCE screen blanking, DPMS, presentation mode, screensaver, and lock settings
-- KDE screen locker and PowerDevil display/suspend profile settings
-
-## Proxmox VM Notes
-
-The system probe checks for KVM/Proxmox-style VMs and reports a warning when the
-guest appears to be using generic virtual CPU or non-VirGL graphics. For
-grandMA3 onPC under Wine in a Proxmox VM, use:
-
-```text
-CPU type: host
-GPU/display: VirGL
-```
-
-Generic KVM/QEMU CPU types have caused Wine/grandMA3 issues in testing.
-
-## Known Constraints
-
-- Official MA onPC support is Windows/macOS; Wine on Linux is unofficial.
-- The tested target is grandMA3 onPC `2.3.2.0`.
-- `app_system.exe HOSTTYPE=onPC` is the launcher path; direct `app_gma3.exe` was
-  not the working route in the reference setup.
-- Use a real terminal/TTY. Detached `nohup`-style launch can fail with
-  `utf8_codepage not supported for input`.
+See LICENSE. The grandMA3 onPC installer is proprietary software from MA
+Lighting Technology GmbH and is not included.
