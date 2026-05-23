@@ -55,6 +55,24 @@ class MaInstaller:
         return target
 
 
+def installer_from_path(path: Path) -> MaInstaller | None:
+    """Create an MaInstaller from an arbitrary file path."""
+    if not path.exists():
+        return None
+    stat = path.stat()
+    if path.suffix.lower() == ".exe":
+        return MaInstaller(
+            path=path,
+            version=infer_version(path.name),
+            size_mb=stat.st_size / 1024 / 1024,
+            mtime=stat.st_mtime,
+        )
+    if path.suffix.lower() == ".zip":
+        candidates = _discover_zip(path)
+        return candidates[0] if candidates else None
+    return None
+
+
 def discover(root: Path) -> list[MaInstaller]:
     directory = root / "ma3onpcinstaller"
     installers: list[MaInstaller] = []

@@ -13,7 +13,7 @@ from rich.prompt import Confirm, IntPrompt, Prompt
 from rich.table import Table
 
 from . import __version__
-from .installers import MaInstaller, discover
+from .installers import MaInstaller, discover, installer_from_path
 from .networking import active_firewalls, apply_firewall_rules, disable_firewalls, likely_primary_interface, set_wineserver_cap_net_raw
 from .power import disable_power_saving
 from .system import detect_distro, find_wineserver, probe, run
@@ -43,6 +43,16 @@ def main(repo_root: Path) -> int:
         return 2
 
     installers = discover(repo_root)
+    if args.installer:
+        custom = installer_from_path(args.installer)
+        if custom is None:
+            console.print(Panel(
+                f"The specified installer path does not exist or is not a supported file:\n[bold]{args.installer}[/bold]",
+                title="Invalid Installer Path",
+                border_style="red",
+            ))
+            return 2
+        installers = [custom]
     selected = select_installer(installers, repo_root)
     if selected is None:
         return 2
@@ -148,6 +158,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="skip running the MA installer EXE and only refresh Wine/DXVK/wintrust/launchers",
     )
+    parser.add_argument(
+        "--installer",
+        type=Path,
+        help="path to a grandMA3 installer EXE or ZIP to use instead of searching ma3onpcinstaller/",
+    )
     return parser.parse_args(sys.argv[1:] if argv is None else argv)
 
 
@@ -178,13 +193,30 @@ def show_proxmox_hint(data: dict[str, str]) -> None:
 def select_installer(installers: list[MaInstaller], repo_root: Path) -> MaInstaller | None:
     if not installers:
         console.print(Panel(
-            "No MA Windows installer EXE found.\n\n"
-            f"Place grandMA3_onPC_win_*.exe in:\n[bold]{repo_root / 'ma3onpcinstaller'}[/bold]\n\n"
-            "Then rerun: python3 install.py",
+            "No MA Windows installer EXE found in the default directory.\n\n"
+            f"Default location: [bold]{repo_root / 'ma3onpcinstaller'}[/bold]\n\n"
+            "You can place an installer there, or specify a custom path below.",
             title="Missing Installer",
             border_style="red",
         ))
-        return None
+        try:
+            custom_path = Prompt.ask("Path to installer EXE or ZIP (leave empty to cancel)")
+        except EOFError:
+            custom_path = ""
+        if not custom_path:
+            console.print("Cancelled.")
+            return None
+        path = Path(custom_path).expanduser()
+        custom = installer_from_path(path)
+        if custom is None:
+            console.print(Panel(
+                f"The specified path does not exist or is not a supported file:\n[bold]{path}[/bold]",
+                title="Invalid Installer Path",
+                border_style="red",
+            ))
+            return None
+        console.print(f"Using provided installer: [bold]{custom.display_source}[/bold]")
+        return custom
     if len(installers) == 1:
         installer = installers[0]
         console.print(f"Using detected installer: [bold]{installer.display_source}[/bold]")
