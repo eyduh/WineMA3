@@ -99,8 +99,18 @@ def main(repo_root: Path) -> int:
         return 1
 
     install_packages(distro)
-    maybe_apply_network_fixes()
-    maybe_disable_power_saving()
+    if _is_nixos():
+        console.print(Panel(
+            "NixOS detected.\n\n"
+            "Firewall rules, wineserver capabilities, and power saving are handled via the NixOS module.\n"
+            "Add [bold]programs.winema3.enable = true;[/bold] to your configuration.nix\n"
+            "to enable MA-Net networking and optional power saving.",
+            title="NixOS Module",
+            border_style="green",
+        ))
+    else:
+        maybe_apply_network_fixes()
+        maybe_disable_power_saving()
     with console.status("[bold green]Installing grandMA3 into Wine prefix...[/bold green]"):
         install_prefix(selected, repo_root, run_installer=run_ma_installer)
 

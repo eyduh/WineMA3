@@ -113,7 +113,6 @@ def disable_power_saving() -> None:
     """Disable OS sleep and desktop idle blanking for the current MA workstation."""
     _install_user_systemd_inhibit_service()
     _install_user_idle_script()
-    _install_user_idle_service()
     _run_user_idle_script_now()
 
 

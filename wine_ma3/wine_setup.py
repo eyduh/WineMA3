@@ -366,8 +366,10 @@ mkdir -p "$DXVK_LOG_PATH"
 }} >> "$log"
 
 cd "$bin" || exit 1
+{'systemctl --user start winema3-inhibit 2>/dev/null || true' if is_nixos else ''}
 wine {wine_command}
 rc=$?
+{'systemctl --user stop winema3-inhibit 2>/dev/null || true' if is_nixos else ''}
 echo "=== gma3 {log_name} {installer.version} exit rc=$rc $(date -Is) ===" >> "$log"
 exit "$rc"
 """
