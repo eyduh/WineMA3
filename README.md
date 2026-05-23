@@ -22,8 +22,13 @@ provide your own installer.
    ```
    This prints a `sha256` hash and adds the file to `/nix/store/`.
 
-3. **Provide** the hash in `packages/sources.nix` (or via an overlay), then
-   build and run:
+   ZIP archives are also supported:
+   ```bash
+   nix-prefetch-url file:///path/to/grandMA3_onPC_win_vX.Y.Z.W.zip
+   ```
+
+3. **Provide** the hash in `packages/sources.nix` (set `sha256` and optionally
+   `name`), then build and run:
    ```bash
    nix run .#gma3
    ```
@@ -88,6 +93,30 @@ This configures:
 - Firewall: UDP `30020`, TCP `30022-30040`, TCP `8080`
 - `security.wrappers.wineserver` with `cap_net_raw=ep`
 - Power management: disables suspend/hibernate and display blanking
+
+## Build-Time vs Runtime Installation
+
+By default, the lowerdir (immutable Wine prefix) does **not** include grandMA3.
+The runner mounts this base prefix and checks for `app_system.exe` in the
+upperdir (your `~/.local/share/gma3/`). If it is missing, it prints instructions
+for runtime installation via `gma3 wine installer.exe /S`.
+
+Alternatively, you can **bake the installer into the lowerdir** at build time
+so grandMA3 is available immediately on first run:
+
+1. Set `sha256` in `packages/sources.nix` as described in Quick Start.
+2. Build the prefixed package:
+   ```bash
+   nix build .#winema3-prefix-with-gma3
+   ```
+3. Override the runner to use it as the lowerdir:
+   ```nix
+   programs.winema3.package = pkgs.winema3.override {
+     prefixBase = pkgs.winema3-prefix-with-gma3;
+   };
+   ```
+
+This is useful for dedicated show machines where you want zero runtime setup.
 
 ## Subcommands
 

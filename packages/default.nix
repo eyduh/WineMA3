@@ -27,6 +27,11 @@
 
       registryPatches = pkgs.callPackage ./registry-patches.nix { };
 
+      prefixWithGma3 = pkgs.callPackage ./prefixWithGma3.nix {
+        inherit inputs wine-packages prefixBase wintrustStub;
+        registryPatches = registryPatches.combined;
+      };
+
       runner = pkgs.callPackage ./runner/package.nix {
         inherit craneLib stdPath wine-packages prefixBase registryPatches;
       };
@@ -38,6 +43,7 @@
     {
       packages = {
         winema3-prefix = prefixBase;
+        winema3-prefix-with-gma3 = prefixWithGma3;
         winema3-wintrust = wintrustStub;
         winema3-registry-patches = registryPatches.combined;
         winema3-runner = runner;
@@ -53,7 +59,7 @@
       };
 
       _module.args = {
-        inherit prefixBase wintrustStub registryPatches;
+        inherit prefixBase prefixWithGma3 wintrustStub registryPatches;
       };
     };
 }
