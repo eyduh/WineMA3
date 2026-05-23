@@ -1,5 +1,5 @@
 #!/usr/bin/env nix-shell
-#! nix-shell -i bash -p "python3.withPackages (ps: [ ps.rich ])" wineWow64Packages.full winetricks dxvk mingw-w64 zenity rsync gnutar zstd curl wget coreutils gnused gnugrep busybox
+#! nix-shell -i bash -p "python3.withPackages (ps: [ ps.rich ])" wineWow64Packages.full winetricks dxvk pkgsCross.mingwW64.stdenv.cc pkgsCross.mingw32.stdenv.cc zenity rsync gnutar zstd curl wget coreutils gnused gnugrep busybox
 
 # WineMA3 — run the Python installer from a pure Nix shell.
 # Usage: ./run.nix [--noinstall | probe | uninstall]

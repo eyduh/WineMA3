@@ -235,11 +235,13 @@ def build_and_install_wintrust(prefix: Path, env: dict[str, str]) -> None:
     build_dir.mkdir(parents=True, exist_ok=True)
     c_path = build_dir / "wintrust_stub.c"
     def_path = build_dir / "wintrust_stub.def"
-    dll_path = build_dir / "wintrust-native.dll"
     c_path.write_text(WINTRUST_C, encoding="utf-8")
     def_path.write_text(WINTRUST_DEF, encoding="utf-8")
+
+    # Build 64-bit
+    dll64_path = build_dir / "wintrust-native.dll"
     run(
-        ["x86_64-w64-mingw32-gcc", "-shared", "-o", str(dll_path), str(c_path), str(def_path), "-Wl,--kill-at"],
+        ["x86_64-w64-mingw32-gcc", "-shared", "-o", str(dll64_path), str(c_path), str(def_path), "-Wl,--kill-at"],
         check=True,
         env=env,
     )
@@ -247,7 +249,21 @@ def build_and_install_wintrust(prefix: Path, env: dict[str, str]) -> None:
     if target.exists() and not any(target.parent.glob("wintrust.dll.winebak.*")):
         backup = target.with_name(f"wintrust.dll.winebak.{_timestamp()}")
         shutil.copy2(target, backup)
-    shutil.copy2(dll_path, target)
+    shutil.copy2(dll64_path, target)
+
+    # Build and install 32-bit if compiler is available
+    if shutil.which("i686-w64-mingw32-gcc"):
+        dll32_path = build_dir / "wintrust-native-x86.dll"
+        run(
+            ["i686-w64-mingw32-gcc", "-shared", "-o", str(dll32_path), str(c_path), str(def_path), "-Wl,--kill-at"],
+            check=True,
+            env=env,
+        )
+        wow64_target = prefix / "drive_c/windows/syswow64/wintrust.dll"
+        if wow64_target.exists() and not any(wow64_target.parent.glob("wintrust.dll.winebak.*")):
+            backup = wow64_target.with_name(f"wintrust.dll.winebak.{_timestamp()}")
+            shutil.copy2(wow64_target, backup)
+        shutil.copy2(dll32_path, wow64_target)
 
 
 def _timestamp() -> str:
