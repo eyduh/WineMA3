@@ -60,13 +60,22 @@ def main(repo_root: Path) -> int:
     if prefix.exists():
         console.print(Panel(
             f"The target Wine prefix already exists:\n[bold]{prefix}[/bold]\n\n"
-            "Continuing will reuse the existing prefix. Wine bootstrap will be skipped.",
+            "[cyan]reuse[/cyan] — Continue with the existing prefix (Wine bootstrap will be skipped).\n"
+            "[cyan]wipe[/cyan]  — Back up the existing prefix and create a fresh one.\n"
+            "[cyan]cancel[/cyan] — Abort and do nothing.",
             title="Existing Prefix",
             border_style="yellow",
         ))
-        if not confirm("Use this existing prefix anyway?", default=False):
+        action = prompt_choice("What should be done?", choices=["reuse", "wipe", "cancel"], default="cancel")
+        if action == "cancel":
             console.print("Cancelled.")
             return 1
+        if action == "wipe":
+            import datetime as _dt
+            import shutil
+            backup = prefix.with_name(f"{prefix.name}.backup.{_dt.datetime.now().strftime('%Y%m%d%H%M%S')}")
+            shutil.move(str(prefix), str(backup))
+            console.print(f"[yellow]Existing prefix backed up to:[/yellow] {backup}")
 
     run_ma_installer = True
     if args.noinstall:
