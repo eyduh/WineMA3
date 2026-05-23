@@ -12,6 +12,7 @@
         pkgs.wget
         pkgs.busybox
         pkgs.fuse-overlayfs
+        pkgs.unzip
       ];
       wine-packages = pkgs.callPackage ./packages.nix {
         inherit stdPath inputs;

@@ -3,8 +3,12 @@ use clap::{Parser, Subcommand};
 use nix::mount::{mount, umount, MsFlags};
 use nix::sched::{unshare, CloneFlags};
 use nix::unistd::{fork, getgid, getuid, ForkResult};
+use serde::Deserialize;
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::env;
 use std::fs;
+use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
@@ -20,7 +24,13 @@ pub(crate) const GNUTAR: &str = env!("GNUTAR");
 pub(crate) const ZENITY: &str = env!("ZENITY");
 pub(crate) const RSYNC: &str = env!("RSYNC");
 pub(crate) const DXVK: &str = env!("DXVK");
+pub(crate) const WINTRUST_STUB: &str = env!("WINTRUST_STUB");
 pub(crate) static LOWER_DIR: LazyLock<PathBuf> = LazyLock::new(|| PathBuf::from(env!("LOWER_DIR")));
+
+static KNOWN_HASHES_JSON: &str = match option_env!("KNOWN_HASHES") {
+    Some(v) => v,
+    None => r#"{"versions":{}}"#,
+};
 
 const MOUNT_FAIL_STATUS: i32 = 111;
 
@@ -47,6 +57,7 @@ enum Program {
     Wineboot { arguments: Vec<String> },
     Wineserver { arguments: Vec<String> },
     Probe,
+    Install { path: PathBuf },
 }
 
 #[derive(Debug)]
@@ -70,6 +81,94 @@ impl Paths {
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct Registry {
+    versions: HashMap<String, VersionInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+struct VersionInfo {
+    sha256: String,
+    filename: String,
+}
+
+fn load_registry() -> Result<Registry> {
+    let registry: Registry = serde_json::from_str(KNOWN_HASHES_JSON)
+        .context("Failed to parse known-hashes registry")?;
+    Ok(registry)
+}
+
+fn compute_file_hash(path: &Path) -> Result<String> {
+    let mut file = fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        let n = file.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buffer[..n]);
+    }
+    let result = hasher.finalize();
+    Ok(hex::encode(result))
+}
+
+fn verify_installer(path: &Path) -> Result<Option<String>> {
+    let hash = compute_file_hash(path)?;
+    let registry = load_registry()?;
+
+    for (version, info) in &registry.versions {
+        if info.sha256 == hash {
+            return Ok(Some(version.clone()));
+        }
+    }
+
+    eprintln!("Unknown installer hash: {}", hash);
+    eprintln!("This installer is not in the known-hashes registry.");
+    eprintln!("Add it to packages/known-hashes.json and rebuild, or verify the file is correct.");
+    Ok(None)
+}
+
+fn extract_installer(path: &Path) -> Result<PathBuf> {
+    let path_str = path.to_string_lossy();
+    if path_str.ends_with(".zip") {
+        let tmp_dir = env::temp_dir().join(format!("winema3-extract-{}", std::process::id()));
+        fs::create_dir_all(&tmp_dir)?;
+        println!("Extracting ZIP archive...");
+        cmd!("unzip", "-q", path, "-d", &tmp_dir).run()?;
+        let exe = walkdir::WalkDir::new(&tmp_dir)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .find(|e| {
+                e.path()
+                    .extension()
+                    .map(|ext| ext.eq_ignore_ascii_case("exe"))
+                    .unwrap_or(false)
+            })
+            .map(|e| e.path().to_path_buf());
+        match exe {
+            Some(p) => Ok(p),
+            None => {
+                fs::remove_dir_all(&tmp_dir).ok();
+                anyhow::bail!("No .exe found inside the ZIP archive")
+            }
+        }
+    } else {
+        Ok(path.to_path_buf())
+    }
+}
+
+fn seed_terminal_config(prefix: &Path) -> Result<()> {
+    let config_dir = prefix.join("drive_c/ProgramData/MALightingTechnology/gma3_2.3.2/terminalapp/config");
+    fs::create_dir_all(&config_dir)?;
+    let config_file = config_dir.join("terminal.cfg");
+    fs::write(
+        &config_file,
+        b"\x02\x00\x00\x00\x7f\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00",
+    )?;
+    Ok(())
 }
 
 fn main() -> Result<()> {
@@ -96,18 +195,21 @@ fn main() -> Result<()> {
     let uid = unsafe { getuid() };
     let gid = unsafe { getgid() };
 
-    let unshare_result = unshare(CloneFlags::CLONE_NEWUSER | CloneFlags::CLONE_NEWNS | CloneFlags::CLONE_NEWPID);
-
     let program = if let Some(subcommand) = args.subcommand {
         ProgramToExecute::Other(subcommand)
     } else {
         ProgramToExecute::Gma3 { arguments: args.gma3_arguments }
     };
 
-    match unshare_result {
-        Ok(()) => mount_run_privileged(&paths, (uid.as_raw(), gid.as_raw()), &program, args.verbose),
-        Err(err) => {
-            error!(errno = ?err, "unshare failed, falling back to fuse-overlayfs");
+    // Try overlayfs mount in an unshared child process. If that fails, the parent
+    // (still in the original namespaces) falls back to fuse-overlayfs.
+    match try_privileged_mount(&paths,
+        (uid.as_raw(), gid.as_raw()),
+        &program,
+        args.verbose,
+    ) {
+        Ok(()) => Ok(()),
+        Err(MountFail) => {
             mount_run_unprivileged(&paths, &program, args.verbose)?;
             Ok(())
         }
@@ -127,34 +229,39 @@ fn init_tracing() {
     let _ = tracing::subscriber::set_global_default(subscriber);
 }
 
-fn mount_run_privileged(
+#[derive(Debug)]
+struct MountFail;
+
+fn try_privileged_mount(
     paths: &Paths,
     ids: (u32, u32),
     program: &ProgramToExecute,
     verbose: bool,
-) -> Result<()> {
-    fs::write("/proc/self/setgroups", b"deny\n")?;
-    fs::write("/proc/self/uid_map", format!("0 {} 1\n", ids.0))?;
-    fs::write("/proc/self/gid_map", format!("0 {} 1\n", ids.1))?;
-
+) -> Result<(), MountFail> {
     match unsafe { fork() } {
         Ok(ForkResult::Parent { child }) => {
-            let status = nix::sys::wait::waitpid(child, None)?;
+            let status = nix::sys::wait::waitpid(child, None).map_err(|_| MountFail)?;
             match status {
                 nix::sys::wait::WaitStatus::Exited(_, status) if status == MOUNT_FAIL_STATUS => {
-                    mount_run_unprivileged(paths, program, verbose)?;
+                    Err(MountFail)
                 }
                 nix::sys::wait::WaitStatus::Exited(_, status) => {
                     std::process::exit(status);
                 }
-                _ => {}
+                _ => Ok(()),
             }
         }
         Ok(ForkResult::Child) => {
             unsafe {
                 libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
             }
-            let result = mount_execute_privileged(paths, program, verbose);
+            let result = (|| -> Result<()> {
+                unshare(CloneFlags::CLONE_NEWUSER | CloneFlags::CLONE_NEWNS)?;
+                fs::write("/proc/self/setgroups", b"deny\n")?;
+                fs::write("/proc/self/uid_map", format!("0 {} 1\n", ids.0))?;
+                fs::write("/proc/self/gid_map", format!("0 {} 1\n", ids.1))?;
+                mount_execute_privileged(paths, program, verbose)
+            })();
             if let Err(err) = result {
                 error!(error = ?err, "privileged mount failed");
                 std::process::exit(MOUNT_FAIL_STATUS);
@@ -163,10 +270,9 @@ fn mount_run_privileged(
         }
         Err(err) => {
             error!(error = ?err, "fork failed");
-            mount_run_unprivileged(paths, program, verbose)?;
+            Err(MountFail)
         }
     }
-    Ok(())
 }
 
 fn mount_execute_privileged(
@@ -196,8 +302,17 @@ fn mount_run_unprivileged(
     program: &ProgramToExecute,
     verbose: bool,
 ) -> Result<()> {
+    // Ensure mount point exists and workdir is clean (kernel overlayfs may have
+    // left a restricted work/ directory behind when the privileged child failed).
+    let nested = paths.work.join("work");
+    if nested.exists() {
+        let _ = fs::set_permissions(&nested, fs::Permissions::from_mode(0o700));
+        let _ = fs::remove_dir_all(&nested);
+    }
+    fs::create_dir_all(&paths.wine_prefix)?;
+
     let options = make_mount_options(paths);
-    let child = std::process::Command::new(FUSE_OVERLAYFS)
+    let _child = std::process::Command::new(FUSE_OVERLAYFS)
         .arg("-o")
         .arg(&options)
         .arg(&paths.wine_prefix)
@@ -231,9 +346,15 @@ fn make_mount_options(paths: &Paths) -> String {
 fn execute(paths: &Paths, program: &ProgramToExecute, verbose: bool) -> Result<()> {
     let user = env::var("USER").unwrap_or_else(|_| "user".to_string());
 
+    eprintln!("[debug] warmup_prefix_directories...");
     warmup_prefix_directories(&paths.upper)?;
+    eprintln!("[debug] warmup_prefix_registry...");
     warmup_prefix_registry(&paths.upper, &user)?;
+    eprintln!("[debug] warmup_wintrust...");
+    warmup_wintrust(&paths.wine_prefix)?;
+    eprintln!("[debug] wineboot_update...");
     wineboot_update(&paths.wine_prefix, verbose)?;
+    eprintln!("[debug] wineboot_update done");
 
     let gma3_exe = paths.wine_prefix
         .join("drive_c/Program Files/MALightingTechnology")
@@ -245,9 +366,11 @@ fn execute(paths: &Paths, program: &ProgramToExecute, verbose: bool) -> Result<(
                 eprintln!("grandMA3 does not appear to be installed in the Wine prefix.");
                 eprintln!("");
                 eprintln!("To install, run:");
-                eprintln!("  gma3 wine /path/to/grandMA3_onPC_win_vX.Y.Z.W.exe /S");
+                eprintln!("  gma3 install /path/to/grandMA3_onPC_win_vX.Y.Z.W.exe");
                 eprintln!("");
-                eprintln!("Or prefetch the installer into Nix and rebuild the package.");
+                eprintln!("Or for ZIP archives:");
+                eprintln!("  gma3 install /path/to/grandMA3_onPC_win_vX.Y.Z.W.zip");
+                eprintln!("");
                 return Ok(());
             }
             let env = make_env(
@@ -285,6 +408,49 @@ fn execute(paths: &Paths, program: &ProgramToExecute, verbose: bool) -> Result<(
         ProgramToExecute::Other(Program::Probe) => {
             run_probe();
         }
+        ProgramToExecute::Other(Program::Install { path }) => {
+            let resolved = match verify_installer(path) {
+                Ok(Some(version)) => {
+                    println!("Verified installer: grandMA3 onPC v{}", version);
+                    extract_installer(path)?
+                }
+                Ok(None) => {
+                    return Ok(());
+                }
+                Err(e) => {
+                    eprintln!("Failed to verify installer: {}", e);
+                    return Ok(());
+                }
+            };
+
+            println!("Installing grandMA3 onPC into the Wine prefix...");
+
+            // Install Visual C++ 2015-2022 redistributable first to avoid installer failure
+            println!("Installing VC++ runtime via winetricks...");
+            let winetricks_env = make_env(
+                duct::cmd(WINETRICKS, &["-q", "vcrun2022"]),
+                &paths.wine_prefix,
+                verbose,
+            );
+            if let Err(e) = winetricks_env.run() {
+                eprintln!("Warning: winetricks vcrun2019 failed: {}", e);
+                eprintln!("Continuing anyway, the installer may still work...");
+            }
+
+            let env = make_env(
+                duct::cmd(WINE, &["start", "/wait", "/unix", resolved.to_string_lossy().to_string().as_str(), "/S"]),
+                &paths.wine_prefix,
+                verbose,
+            );
+            env.run()?;
+
+            // Seed terminal config
+            if let Err(e) = seed_terminal_config(&paths.wine_prefix) {
+                eprintln!("Warning: failed to seed terminal config: {}", e);
+            }
+
+            println!("Installation complete. You can now run `gma3` to launch grandMA3 onPC.");
+        }
     }
 
     let _ = make_env(duct::cmd(WINESERVER, &["-w"]), &paths.wine_prefix, verbose).run();
@@ -295,7 +461,9 @@ fn execute(paths: &Paths, program: &ProgramToExecute, verbose: bool) -> Result<(
 fn make_env(expression: duct::Expression, wine_prefix: &Path, verbose: bool) -> duct::Expression {
     let expression = expression
         .env("WINEPREFIX", wine_prefix.display().to_string())
-        .env("WINEPATH", DXVK);
+        .env("WINEPATH", format!("{};{}", WINTRUST_STUB, DXVK))
+        .env("WINEARCH", "win64")
+        .env("WINEDLLOVERRIDES", "wintrust=n,b;mscoree=;mshtml=");
     if verbose {
         expression
     } else {
@@ -315,6 +483,31 @@ fn warmup_prefix_directories(destination: &Path) -> Result<()> {
                 return Err(err.into());
             }
         }
+    }
+    Ok(())
+}
+
+fn warmup_wintrust(prefix: &Path) -> Result<()> {
+    let stub_path = PathBuf::from(WINTRUST_STUB).join("wintrust.dll");
+    eprintln!("[debug] warmup_wintrust stub_path={}", stub_path.display());
+    if !stub_path.exists() {
+        eprintln!("[debug] stub does not exist, skipping");
+        return Ok(());
+    }
+    eprintln!("[debug] reading stub...");
+    let stub_bytes = fs::read(&stub_path)?;
+    eprintln!("[debug] stub size={}", stub_bytes.len());
+    for subdir in ["system32", "syswow64"] {
+        let dest_dir = prefix.join("drive_c/windows").join(subdir);
+        eprintln!("[debug] creating dest_dir={}", dest_dir.display());
+        fs::create_dir_all(&dest_dir)?;
+        let dest = dest_dir.join("wintrust.dll");
+        eprintln!("[debug] writing dest={}", dest.display());
+        if let Err(e) = fs::write(&dest, &stub_bytes) {
+            eprintln!("[debug] fs::write failed: kind={:?}, path={}", e.kind(), dest.display());
+            return Err(e.into());
+        }
+        eprintln!("[debug] wrote dest OK");
     }
     Ok(())
 }

@@ -1,57 +1,38 @@
 # WineMA3
 
-WineMA3 is a Nix-native runner for grandMA3 onPC (professional lighting console
-software from MA Lighting) on Linux. It builds a layered Wine prefix with DXVK
-and a custom wintrust stub, then mounts it via overlayfs at runtime for a clean,
-immutable-base + mutable-upper experience.
+> **WIP / Experimental** — This branch is an active rewrite. Some features are
+> broken or unfinished. Use at your own risk.
+>
+> Co-authored with Claude Code, Ollama, and Kimi k2.6.
 
-Target systems: **NixOS** (primary) and any flake-enabled Nix install on
-`x86_64-linux`.
+Nix-native runner for grandMA3 onPC (professional lighting console software from
+MA Lighting) on Linux. Uses a layered Wine prefix with DXVK and a custom
+wintrust stub, mounted via overlayfs at runtime.
 
-## Quick Start (1-2-3)
+Target: **NixOS** and any flake-enabled Nix install on `x86_64-linux`.
 
-grandMA3 onPC is proprietary software and cannot be redistributed. You must
-provide your own installer.
+## How it works
 
-1. **Download** the grandMA3 onPC Windows installer from
-   [malighting.com](https://www.malighting.com/downloads/).
+A Wine prefix containing DXVK, the wintrust stub, and registry patches is built
+in Nix and mounted at runtime. Overlayfs keeps your user data intact.
+`fuse-overlayfs` is fallen back to on hardened kernels.
 
-2. **Prefetch** it into the Nix store:
-   ```bash
-   nix-prefetch-url file:///path/to/grandMA3_onPC_win_vX.Y.Z.W.exe
-   ```
-   This prints a `sha256` hash and adds the file to `/nix/store/`.
+## Running ad-hoc
 
-   ZIP archives are also supported:
-   ```bash
-   nix-prefetch-url file:///path/to/grandMA3_onPC_win_vX.Y.Z.W.zip
-   ```
-
-3. **Provide** the hash in `packages/sources.nix` (set `sha256` and optionally
-   `name`), then build and run:
-   ```bash
-   nix run .#gma3
-   ```
-
-## Installation Methods
-
-### Ephemeral (nix run)
-
-Run without installing:
 ```bash
 nix run github:eyduh/WineMA3
 ```
 
-### User profile (nix profile)
+## Installing on your system
 
-Add to your user profile:
+### nix profile
+
 ```bash
 nix profile install github:eyduh/WineMA3
 ```
 
-### NixOS / Home Manager (declarative)
+### NixOS / Home Manager
 
-Add the overlay and package to your system configuration:
 ```nix
 {
   inputs.winema3.url = "github:eyduh/WineMA3";
@@ -64,14 +45,12 @@ Add the overlay and package to your system configuration:
       };
     in
     {
-      # NixOS configuration
       nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
         inherit pkgs;
         modules = [
           winema3.nixosModules.default
           {
             programs.winema3.enable = true;
-            programs.winema3.package = pkgs.winema3;
           }
         ];
       };
@@ -79,10 +58,70 @@ Add the overlay and package to your system configuration:
 }
 ```
 
-### NixOS Module
+## Installing grandMA3 onPC
 
-Enable the module for automatic firewall rules, wineserver capabilities, and
-power management:
+grandMA3 onPC is proprietary software and cannot be redistributed. You must
+provide your own installer.
+
+### Runtime installation (recommended)
+
+Download the Windows installer from
+[malighting.com](https://www.malighting.com/downloads/) and run:
+
+```bash
+gma3 install /path/to/grandMA3_onPC_win_vX.Y.Z.W.exe
+```
+
+ZIP archives are also supported:
+
+```bash
+gma3 install /path/to/grandMA3_onPC_win_vX.Y.Z.W.zip
+```
+
+The runner verifies the installer hash against a known-hashes registry and
+installs into the Wine prefix. After installation, run `gma3` to launch.
+
+### NixOS module — bake the installer in at build time
+
+If you want grandMA3 available immediately on first run (useful for show
+machines), prefetch the installer into the Nix store and point the module to it:
+
+```bash
+nix-prefetch-url file:///path/to/grandMA3_onPC_win_v2.3.2.0.exe
+```
+
+Then in your NixOS config:
+
+```nix
+{
+  programs.winema3.enable = true;
+  programs.winema3.installerPath = "/nix/store/...-grandMA3_onPC_win_v2.3.2.0.exe";
+}
+```
+
+The hash is verified at build time against `packages/known-hashes.json`.
+
+## Subcommands
+
+```bash
+gma3 --help
+```
+
+| Command | Description |
+|---------|-------------|
+| `gma3` | Launch grandMA3 onPC (default) |
+| `gma3 install <path>` | Install grandMA3 from an EXE or ZIP |
+| `gma3 wine <cmd>` | Run any Wine command in the prefix |
+| `gma3 winetricks` | Run winetricks |
+| `gma3 wineboot` | Run wineboot |
+| `gma3 wineserver` | Run wineserver |
+| `gma3 probe` | System diagnostics |
+
+## NixOS Module
+
+Enable the module for automatic firewall, wineserver capabilities, and power
+management:
+
 ```nix
 {
   programs.winema3.enable = true;
@@ -94,82 +133,18 @@ This configures:
 - `security.wrappers.wineserver` with `cap_net_raw=ep`
 - Power management: disables suspend/hibernate and display blanking
 
-## Build-Time vs Runtime Installation
-
-By default, the lowerdir (immutable Wine prefix) does **not** include grandMA3.
-The runner mounts this base prefix and checks for `app_system.exe` in the
-upperdir (your `~/.local/share/gma3/`). If it is missing, it prints instructions
-for runtime installation via `gma3 wine installer.exe /S`.
-
-Alternatively, you can **bake the installer into the lowerdir** at build time
-so grandMA3 is available immediately on first run:
-
-1. Set `sha256` in `packages/sources.nix` as described in Quick Start.
-2. Build the prefixed package:
-   ```bash
-   nix build .#winema3-prefix-with-gma3
-   ```
-3. Override the runner to use it as the lowerdir:
-   ```nix
-   programs.winema3.package = pkgs.winema3.override {
-     prefixBase = pkgs.winema3-prefix-with-gma3;
-   };
-   ```
-
-This is useful for dedicated show machines where you want zero runtime setup.
-
-## Subcommands
-
-The `winema3-runner` binary (exposed as `gma3`) supports:
-
-- `gma3` (default) — launch grandMA3 onPC
-- `gma3 wine <cmd>` — run any Wine command in the prefix
-- `gma3 winetricks` — run winetricks
-- `gma3 wineboot` — run wineboot
-- `gma3 wineserver` — run wineserver
-- `gma3 probe` — system diagnostics
-
-## Architecture
-
-- **Nix (~57%)** — packaging, Wine prefix derivation, overlayfs setup, NixOS
-  module
-- **Rust (~41%)** — runtime runner (`crates/runner/`): overlayfs mount,
-  XDG paths, Wine proxying, CLI
-- **Python (~2%)** — NixOS VM test script (`tests/gma3.py`)
-
-## Runtime Paths
-
-- Upper (user data): `~/.local/share/gma3/`
-- Workdir: `~/.local/state/gma3/`
-- Runtime mount: `/run/user/<uid>/gma3-prefix-<pid>/`
-
-## Multi-Version Support
-
-The runner uses Cargo feature flags for different grandMA3 versions. The overlay
-exposes versioned packages such as `gma3-v2320`, `gma3-v2330`, etc.
-
 ## Troubleshooting
 
 **Overlayfs mount fails**: the runner automatically falls back to
-`fuse-overlayfs`. If both fail, check that your kernel supports user namespaces
-and overlayfs.
+`fuse-overlayfs`. If both fail, check that your kernel supports user namespaces.
 
-**Reset the upperdir** (user data layer):
+**Reset user data** (uninstall grandMA3 from the prefix):
 ```bash
 rm -rf ~/.local/share/gma3 ~/.local/state/gma3
 ```
 
-**Switch grandMA3 versions**: change the version in your overlay and rebuild.
-The lowerdir (immutable base prefix) will change, but your upperdir (user data)
-will remain.
-
-## Technical Notes
-
-- Uses stock `wineWow64Packages.full` from nixpkgs (no custom Wine fork)
-- DXVK is provided at runtime via `WINEPATH`, not baked into the prefix
-- `wintrust.dll` stub is cross-compiled with MinGW at build time
-- Registry patches (`wintrust=n,b`, `dxgi=n`, `d3d11=n`) are applied at build
-  time
+**Unknown installer hash**: the installer is not in `packages/known-hashes.json`.
+Add the hash and rebuild, or verify the file is correct.
 
 ## License
 

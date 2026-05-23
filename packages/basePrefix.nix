@@ -22,12 +22,14 @@ let
 
     ${lib.getExe wine} wineboot --update
 
-    # Disable file association and menu builder
-    ${lib.getExe wine} regedit /S "${(writeText "file-association-disable.reg" ''
+    # Disable file association, menu builder, and Mono/Gecko prompts
+    ${lib.getExe wine} regedit /S "${(writeText "prefix-tweaks.reg" ''
       Windows Registry Editor Version 5.00
 
       [HKEY_CURRENT_USER\Software\Wine\DllOverrides]
       "winemenubuilder.exe"=""
+      "mscoree"=""
+      "mshtml"=""
 
       [HKEY_CURRENT_USER\Software\Wine\FileOpenAssociations]
       "Enable"="N"
@@ -51,7 +53,7 @@ let
       mkdir -p /tmp/cache
       export XDG_CACHE_HOME="/tmp/cache"
 
-      ${lib.getExe wine} winecfg -v win11
+      ${lib.getExe wine} winecfg -v win10
 
       ${lib.getExe wineserver} -w
     '';

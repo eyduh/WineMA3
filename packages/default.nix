@@ -17,6 +17,7 @@
         pkgs.wget
         pkgs.busybox
         pkgs.fuse-overlayfs
+        pkgs.unzip
       ];
 
       prefixBase = pkgs.callPackage ./basePrefix.nix {
@@ -33,7 +34,7 @@
       };
 
       runner = pkgs.callPackage ./runner/package.nix {
-        inherit craneLib stdPath wine-packages prefixBase registryPatches;
+        inherit craneLib stdPath wine-packages prefixBase registryPatches wintrustStub;
       };
 
       desktopItems = pkgs.callPackage ./desktopItems.nix { };
@@ -43,7 +44,6 @@
     {
       packages = {
         winema3-prefix = prefixBase;
-        winema3-prefix-with-gma3 = prefixWithGma3;
         winema3-wintrust = wintrustStub;
         winema3-registry-patches = registryPatches.combined;
         winema3-runner = runner;
@@ -59,7 +59,7 @@
       };
 
       _module.args = {
-        inherit prefixBase prefixWithGma3 wintrustStub registryPatches;
+        inherit stdPath prefixBase wintrustStub registryPatches runner desktopItems icons;
       };
     };
 }

@@ -6,6 +6,7 @@
   wine-packages,
   prefixBase,
   registryPatches,
+  wintrustStub,
   ...
 }:
 let
@@ -26,6 +27,8 @@ let
     ZENITY = lib.getExe pkgs.zenity;
     RSYNC = lib.getExe pkgs.rsync;
     DXVK = "${pkgs.dxvk.bin}/x64";
+    WINTRUST_STUB = wintrustStub;
+    KNOWN_HASHES = builtins.readFile ../../packages/known-hashes.json;
   };
 in
 craneLib.buildPackage (
