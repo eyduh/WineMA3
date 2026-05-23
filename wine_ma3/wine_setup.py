@@ -116,11 +116,16 @@ def install_dxvk(env: dict[str, str]) -> None:
         if _try_dxvk_command(["dxvk-setup", "install"], env, attempts):
             return
     if _is_nixos():
+        # Prefer the official nixpkgs setup_dxvk.sh when available
+        if shutil.which("setup_dxvk.sh"):
+            if _try_dxvk_command(["setup_dxvk.sh", "install"], env, attempts):
+                return
+        # Fallback to manual copy from nix store
         dxvk_path = _find_nixos_dxvk()
         if dxvk_path:
             _install_dxvk_from_path(dxvk_path, env)
             return
-        attempts.append("NixOS: DXVK_PATH not found in environment and no dxvk package in PATH")
+        attempts.append("NixOS: DXVK setup failed. Neither setup_dxvk.sh nor dxvk package found.")
     if not attempts:
         raise RuntimeError("DXVK setup requires either winetricks or Debian's dxvk-setup")
     raise RuntimeError("DXVK setup failed:\n\n" + "\n\n".join(attempts))
@@ -161,15 +166,20 @@ def _install_dxvk_from_path(dxvk_path: Path, env: dict[str, str]) -> None:
     x64_dlls = ["d3d11.dll", "dxgi.dll", "d3d10core.dll"]
     x32_dlls = ["d3d11.dll", "dxgi.dll", "d3d10core.dll"]
 
+    def _copy_dll(src: Path, dst: Path) -> None:
+        if not src.exists():
+            return
+        if dst.exists():
+            import os
+            os.chmod(dst, 0o644)
+            dst.unlink()
+        shutil.copy2(src, dst)
+
     for dll in x64_dlls:
-        src = dxvk_path / "x64" / dll
-        if src.exists():
-            shutil.copy2(src, system32 / dll)
+        _copy_dll(dxvk_path / "x64" / dll, system32 / dll)
 
     for dll in x32_dlls:
-        src = dxvk_path / "x32" / dll
-        if src.exists():
-            shutil.copy2(src, syswow64 / dll)
+        _copy_dll(dxvk_path / "x32" / dll, syswow64 / dll)
 
     # Set registry overrides for DXVK DLLs
     from .system import run as _run
@@ -245,11 +255,20 @@ def build_and_install_wintrust(prefix: Path, env: dict[str, str]) -> None:
         check=True,
         env=env,
     )
+    def _install_wintrust_dll(src: Path, dst: Path) -> None:
+        if dst.exists() and not any(dst.parent.glob("wintrust.dll.winebak.*")):
+            backup = dst.with_name(f"wintrust.dll.winebak.{_timestamp()}")
+            import os
+            os.chmod(dst, 0o644)
+            shutil.copy2(dst, backup)
+        import os
+        if dst.exists():
+            os.chmod(dst, 0o644)
+            dst.unlink()
+        shutil.copy2(src, dst)
+
     target = prefix / "drive_c/windows/system32/wintrust.dll"
-    if target.exists() and not any(target.parent.glob("wintrust.dll.winebak.*")):
-        backup = target.with_name(f"wintrust.dll.winebak.{_timestamp()}")
-        shutil.copy2(target, backup)
-    shutil.copy2(dll64_path, target)
+    _install_wintrust_dll(dll64_path, target)
 
     # Build and install 32-bit if compiler is available
     if shutil.which("i686-w64-mingw32-gcc"):
@@ -260,10 +279,7 @@ def build_and_install_wintrust(prefix: Path, env: dict[str, str]) -> None:
             env=env,
         )
         wow64_target = prefix / "drive_c/windows/syswow64/wintrust.dll"
-        if wow64_target.exists() and not any(wow64_target.parent.glob("wintrust.dll.winebak.*")):
-            backup = wow64_target.with_name(f"wintrust.dll.winebak.{_timestamp()}")
-            shutil.copy2(wow64_target, backup)
-        shutil.copy2(dll32_path, wow64_target)
+        _install_wintrust_dll(dll32_path, wow64_target)
 
 
 def _timestamp() -> str:
