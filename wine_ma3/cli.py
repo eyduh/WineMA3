@@ -96,12 +96,18 @@ def main(repo_root: Path) -> int:
     if ma_version_installed(selected):
         console.print(Panel(
             f"grandMA3 {selected.version} already appears to be installed in the target prefix.\n\n"
-            "You can skip the MA installer and just refresh DXVK, the wintrust patch, and launchers.",
+            "[cyan]skip[/cyan]  — Skip the MA installer and just refresh DXVK, wintrust, and launchers.\n"
+            "[cyan]rerun[/cyan] — Run the silent MA installer again (useful for repairs).\n"
+            "[cyan]cancel[/cyan] — Abort and do nothing.",
             title="Existing grandMA3 Install",
             border_style="yellow",
         ))
         if not args.noinstall:
-            run_ma_installer = confirm("Run the silent MA installer again?", default=False)
+            action = prompt_choice("What should be done?", choices=["skip", "rerun", "cancel"], default="skip")
+            if action == "cancel":
+                console.print("Cancelled.")
+                return 1
+            run_ma_installer = action == "rerun"
 
     if not confirm("Continue with package installation and Wine prefix setup?", default=False):
         console.print("Cancelled.")
