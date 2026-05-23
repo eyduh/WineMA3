@@ -269,6 +269,17 @@ def seed_terminal_config(installer: MaInstaller) -> None:
     cfg.write_bytes(TERMINAL_CFG)
 
 
+def _nix_compiler_env(env: dict[str, str]) -> dict[str, str]:
+    """Preserve Nix compiler-wrapper environment variables for cross-compilers."""
+    if not _is_nixos():
+        return env
+    merged = env.copy()
+    for key, value in os.environ.items():
+        if key.startswith("NIX_"):
+            merged.setdefault(key, value)
+    return merged
+
+
 def build_and_install_wintrust(prefix: Path, env: dict[str, str]) -> None:
     if shutil.which("x86_64-w64-mingw32-gcc") is None:
         raise RuntimeError("x86_64-w64-mingw32-gcc is required to build wintrust.dll")
@@ -284,7 +295,7 @@ def build_and_install_wintrust(prefix: Path, env: dict[str, str]) -> None:
     run(
         ["x86_64-w64-mingw32-gcc", "-shared", "-o", str(dll64_path), str(c_path), str(def_path), "-Wl,--kill-at"],
         check=True,
-        env=env,
+        env=_nix_compiler_env(env),
     )
     def _install_wintrust_dll(src: Path, dst: Path) -> None:
         if dst.exists() and not any(dst.parent.glob("wintrust.dll.winebak.*")):
