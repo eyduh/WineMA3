@@ -26,7 +26,14 @@ def _read_os_release() -> dict[str, str]:
     return data
 
 
+def _is_nixos() -> bool:
+    os_release = _read_os_release()
+    return "nixos" in f"{os_release.get('ID', '')} {os_release.get('ID_LIKE', '')}".lower()
+
+
 def _rich_package_command() -> list[str] | None:
+    if _is_nixos():
+        return None
     os_release = _read_os_release()
     distro_ids = " ".join(
         [os_release.get("ID", ""), os_release.get("ID_LIKE", "")]
@@ -45,6 +52,16 @@ def _rich_package_command() -> list[str] | None:
 def _ensure_rich() -> None:
     if importlib.util.find_spec("rich") is not None:
         return
+    if _is_nixos():
+        repo = Path(__file__).resolve().parent
+        run_nix = repo / "run.nix"
+        print("NixOS detected. This installer requires python-rich.")
+        if run_nix.exists():
+            print(f"Run with the provided nix-shell shebang:")
+            print(f"  {run_nix}")
+        print("Or enter a nix-shell with rich:")
+        print("  nix-shell -p 'python3.withPackages (ps: [ps.rich])' wineWow64Packages.full winetricks")
+        raise SystemExit(2)
     command = _rich_package_command()
     print("python-rich is required for this installer.")
     if command is None:

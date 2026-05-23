@@ -111,24 +111,34 @@ X-GNOME-Autostart-enabled=true
 
 def disable_power_saving() -> None:
     """Disable OS sleep and desktop idle blanking for the current MA workstation."""
-    _install_root_file(SLEEP_CONF, Path("/etc/systemd/sleep.conf.d/90-winema3-no-sleep.conf"))
-    run(
-        [
-            "sudo",
-            "systemctl",
-            "mask",
-            "sleep.target",
-            "suspend.target",
-            "hibernate.target",
-            "hybrid-sleep.target",
-            "suspend-then-hibernate.target",
-        ],
-        check=True,
-    )
-    _install_root_file(XORG_NO_BLANK_CONF, Path("/etc/X11/xorg.conf.d/90-winema3-no-blanking.conf"))
-    _remove_old_user_inhibit_service()
+    _install_user_systemd_inhibit_service()
     _install_user_idle_script()
+    _install_user_idle_service()
     _run_user_idle_script_now()
+
+
+def _install_user_systemd_inhibit_service() -> None:
+    """Create a user systemd service that inhibits sleep via systemd-inhibit."""
+    service_dir = Path.home() / ".config/systemd/user"
+    service_dir.mkdir(parents=True, exist_ok=True)
+    service_file = service_dir / "winema3-inhibit.service"
+    service_file.write_text(
+        """[Unit]
+Description=WineMA3 inhibit sleep/idle for grandMA3 onPC
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+ExecStart=/usr/bin/systemd-inhibit --what=handle-lid-switch:handle-suspend-key:handle-hibernate-key:handle-power-key --who=grandMA3 --why="grandMA3 onPC show running" --mode=block sleep infinity
+
+[Install]
+WantedBy=default.target
+""",
+        encoding="utf-8",
+    )
+    run(["systemctl", "--user", "daemon-reload"], check=False)
+    run(["systemctl", "--user", "enable", "--now", "winema3-inhibit.service"], check=False)
 
 
 def _install_root_file(content: str, target: Path) -> None:

@@ -15,7 +15,17 @@ class FirewallState:
     rules_supported: bool
 
 
+def _is_nixos() -> bool:
+    from .system import read_os_release
+    os_release = read_os_release()
+    return "nixos" in f"{os_release.get('ID', '')} {os_release.get('ID_LIKE', '')}".lower()
+
+
 def set_wineserver_cap_net_raw() -> None:
+    if _is_nixos():
+        print("NixOS: cap_net_raw must be set via security.wrappers in your NixOS config.")
+        print("Example:\n  security.wrappers.wineserver = {\n    setuid = false;\n    owner = \"root\";\n    group = \"root\";\n    capabilities = \"cap_net_raw=ep\";\n    source = \"${pkgs.wine}/bin/wineserver\";\n  };")
+        return
     wineserver = find_wineserver()
     if not wineserver:
         raise RuntimeError("wineserver not found")

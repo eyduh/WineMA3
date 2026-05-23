@@ -98,6 +98,16 @@ def detect_distro() -> Distro | None:
     name = os_release.get("PRETTY_NAME", distro_id or platform.platform())
     tokens = f"{distro_id} {distro_like}"
 
+    if "nixos" in tokens:
+        return Distro(
+            distro_id,
+            distro_like,
+            name,
+            "nix-shell",
+            [],
+            [],
+            "python3Packages.rich",
+        )
     if any(x in tokens for x in ("arch", "cachyos", "manjaro")):
         return Distro(
             distro_id,

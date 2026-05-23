@@ -23,6 +23,12 @@ from .wine_setup import install_prefix, ma_version_installed, prefix_path
 console = Console()
 
 
+def _is_nixos() -> bool:
+    from .system import read_os_release
+    os_release = read_os_release()
+    return "nixos" in f"{os_release.get('ID', '')} {os_release.get('ID_LIKE', '')}".lower()
+
+
 def main(repo_root: Path) -> int:
     args = parse_args()
     console.print(Panel.fit(f"[bold]WineMA3[/bold] {__version__}\nWine-only grandMA3 onPC installer", border_style="cyan"))
@@ -184,6 +190,15 @@ def select_installer(installers: list[MaInstaller], repo_root: Path) -> MaInstal
 
 
 def install_packages(distro) -> None:
+    if distro.package_manager == "nix-shell":
+        console.print(Panel(
+            f"Distro: [bold]{distro.name}[/bold]\n\n"
+            "NixOS handles dependencies via nix-shell.\n"
+            "Make sure you are running this through run.nix or a suitable nix-shell.",
+            title="Package Install",
+            border_style="green",
+        ))
+        return
     packages = list(distro.packages)
     console.print(Panel(
         f"Distro: [bold]{distro.name}[/bold]\n"
@@ -208,6 +223,21 @@ def ensure_apt_i386_architecture() -> None:
 
 
 def maybe_apply_network_fixes() -> None:
+    if _is_nixos():
+        console.print(Panel(
+            "NixOS detected.\n\n"
+            "Firewall and capability rules must be configured via NixOS modules:\n"
+            "- networking.firewall.allowedUDPPorts = [ 30020 ];\n"
+            "- networking.firewall.allowedTCPPorts = [ 8080 ] ++ builtins.genList (n: 30022 + n) 19;\n"
+            "- security.wrappers.wineserver.capabilities = \"cap_net_raw=ep\";\n\n"
+            "See the NixOS module in this repo for a full configuration.",
+            title="Networking (NixOS)",
+            border_style="yellow",
+        ))
+        if find_wineserver() and confirm("Attempt cap_net_raw via setcap anyway?", default=False):
+            set_wineserver_cap_net_raw()
+        return
+
     if find_wineserver() and confirm("Set cap_net_raw on wineserver for MA-Net networking?", default=True):
         set_wineserver_cap_net_raw()
         console.print("[green]wineserver cap_net_raw set.[/green]")
@@ -252,7 +282,8 @@ def maybe_apply_network_fixes() -> None:
 def maybe_disable_power_saving() -> None:
     console.print(Panel(
         "grandMA3 systems should not suspend, lock, blank the display, or turn off displays while a show is running.\n\n"
-        "This applies systemd sleep blocks, X11 DPMS/screensaver settings, and a desktop autostart helper for the current user.",
+        "This installs a user systemd inhibit service and a desktop autostart helper for the current user.\n"
+        "No root access is required.",
         title="Power Saving",
         border_style="yellow",
     ))
@@ -260,7 +291,7 @@ def maybe_disable_power_saving() -> None:
         console.print("[yellow]Skipped power saving changes.[/yellow]")
         return
     disable_power_saving()
-    console.print("[green]OS sleep and desktop idle power saving disabled.[/green]")
+    console.print("[green]User-level sleep inhibition and desktop idle power saving disabled.[/green]")
 
 
 def confirm(message: str, *, default: bool) -> bool:
