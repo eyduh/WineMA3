@@ -293,17 +293,21 @@ def create_launchers(installer: MaInstaller) -> None:
     bin_dir = prefix / "drive_c/Program Files/MALightingTechnology" / installer.install_dir_name / "bin"
     local_bin = Path.home() / ".local/bin"
     local_bin.mkdir(parents=True, exist_ok=True)
-    (local_bin / "gma3").write_text(_launcher(installer, "app_system.exe HOSTTYPE=onPC", "run"), encoding="utf-8")
-    (local_bin / "gma3term").write_text(_launcher(installer, 'app_terminal.exe "$@"', "terminal"), encoding="utf-8")
+    is_nixos = _is_nixos()
+    (local_bin / "gma3").write_text(_launcher(installer, "app_system.exe HOSTTYPE=onPC", "run", is_nixos=is_nixos), encoding="utf-8")
+    (local_bin / "gma3term").write_text(_launcher(installer, 'app_terminal.exe "$@"', "terminal", is_nixos=is_nixos), encoding="utf-8")
     (local_bin / "gma3").chmod(0o755)
     (local_bin / "gma3term").chmod(0o755)
     _create_fish_helpers()
     _create_desktop_file(bin_dir)
 
 
-def _launcher(installer: MaInstaller, wine_command: str, log_name: str) -> str:
+def _launcher(installer: MaInstaller, wine_command: str, log_name: str, *, is_nixos: bool = False) -> str:
     prefix = f'$HOME/{installer.prefix_name}'
-    return f"""#!/usr/bin/env bash
+    shebang = "#!/usr/bin/env bash"
+    if is_nixos:
+        shebang = "#!/usr/bin/env nix-shell\n#! nix-shell -i bash -p wineWow64Packages.full dxvk"
+    return f"""{shebang}
 set -u
 
 export DISPLAY="${{DISPLAY:-:0}}"
