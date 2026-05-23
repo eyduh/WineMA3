@@ -84,7 +84,7 @@ stdenv.mkDerivation {
     # keep their installer EXEs in a writable directory.
     substituteInPlace $out/libexec/winema3/install.py \
       --replace-fail 'REPO_ROOT = Path(__file__).resolve().parent' \
-        'REPO_ROOT = Path(os.environ.get("WINEMA3_REPO_ROOT", __file__)).resolve().parent'
+        'REPO_ROOT = Path(os.environ.get("WINEMA3_REPO_ROOT", str(Path(__file__).resolve().parent)))'
 
     mkdir -p $out/bin
 
