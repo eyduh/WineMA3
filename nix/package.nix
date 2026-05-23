@@ -69,7 +69,11 @@ stdenv.mkDerivation {
 
   src = ../.;
 
-  nativeBuildInputs = [ makeWrapper ];
+  nativeBuildInputs = [
+    makeWrapper
+    pkgsCross.mingwW64.stdenv.cc
+    pkgsCross.mingw32.stdenv.cc
+  ];
 
   dontConfigure = true;
   dontBuild = true;
@@ -77,8 +81,69 @@ stdenv.mkDerivation {
   installPhase = ''
     runHook preInstall
 
-    mkdir -p $out/libexec/winema3
+    mkdir -p $out/libexec/winema3/wintrust
     cp -r install.py probe.py uninstall.py wine_ma3 assets $out/libexec/winema3/
+
+    # Pre-build wintrust stubs so users don't need the cross-compiler at runtime
+    cat > $out/libexec/winema3/wintrust/wintrust_stub.c <<'CEOF'
+#include <stdarg.h>
+#include <windef.h>
+#include <winbase.h>
+#include <wintrust.h>
+
+LONG WINAPI WinVerifyTrust(HWND hwnd, GUID *action_id, LPVOID data)
+{
+    SetLastError(ERROR_SUCCESS);
+    return ERROR_SUCCESS;
+}
+
+HRESULT WINAPI WinVerifyTrustEx(HWND hwnd, GUID *action_id, WINTRUST_DATA *data)
+{
+    SetLastError(ERROR_SUCCESS);
+    return S_OK;
+}
+
+BOOL WINAPI WintrustAddActionID(GUID *pgActionID, DWORD fdwFlags, CRYPT_REGISTER_ACTIONID *psActionID)
+{
+    SetLastError(ERROR_SUCCESS);
+    return TRUE;
+}
+
+BOOL WINAPI WintrustRemoveActionID(GUID *pgActionID)
+{
+    SetLastError(ERROR_SUCCESS);
+    return TRUE;
+}
+
+HRESULT WINAPI DllRegisterServer(void)
+{
+    return S_OK;
+}
+
+HRESULT WINAPI DllUnregisterServer(void)
+{
+    return S_OK;
+}
+CEOF
+
+    cat > $out/libexec/winema3/wintrust/wintrust_stub.def <<'DEFEOF'
+LIBRARY wintrust.dll
+EXPORTS
+    WinVerifyTrust
+    WinVerifyTrustEx
+    WintrustAddActionID
+    WintrustRemoveActionID
+    DllRegisterServer
+    DllUnregisterServer
+DEFEOF
+
+    x86_64-w64-mingw32-gcc -shared -o $out/libexec/winema3/wintrust/wintrust-native.dll \
+      $out/libexec/winema3/wintrust/wintrust_stub.c \
+      $out/libexec/winema3/wintrust/wintrust_stub.def -Wl,--kill-at
+
+    i686-w64-mingw32-gcc -shared -o $out/libexec/winema3/wintrust/wintrust-native-x86.dll \
+      $out/libexec/winema3/wintrust/wintrust_stub.c \
+      $out/libexec/winema3/wintrust/wintrust_stub.def -Wl,--kill-at
 
     # Allow overriding the repo root via environment variable so users can
     # keep their installer EXEs in a writable directory.

@@ -280,7 +280,39 @@ def _nix_compiler_env(env: dict[str, str]) -> dict[str, str]:
     return merged
 
 
+def _prebuilt_wintrust_dir() -> Path | None:
+    """Return the prebuilt wintrust DLL directory if shipped with the package."""
+    prebuilt = Path(__file__).resolve().parent.parent / "wintrust"
+    if (prebuilt / "wintrust-native.dll").exists():
+        return prebuilt
+    return None
+
+
+def _install_wintrust_dll(src: Path, dst: Path) -> None:
+    if dst.exists() and not any(dst.parent.glob("wintrust.dll.winebak.*")):
+        backup = dst.with_name(f"wintrust.dll.winebak.{_timestamp()}")
+        import os
+        os.chmod(dst, 0o644)
+        shutil.copy2(dst, backup)
+    import os
+    if dst.exists():
+        os.chmod(dst, 0o644)
+        dst.unlink()
+    shutil.copy2(src, dst)
+
+
 def build_and_install_wintrust(prefix: Path, env: dict[str, str]) -> None:
+    prebuilt = _prebuilt_wintrust_dir()
+    if prebuilt is not None:
+        dll64_path = prebuilt / "wintrust-native.dll"
+        target = prefix / "drive_c/windows/system32/wintrust.dll"
+        _install_wintrust_dll(dll64_path, target)
+        dll32_path = prebuilt / "wintrust-native-x86.dll"
+        if dll32_path.exists():
+            wow64_target = prefix / "drive_c/windows/syswow64/wintrust.dll"
+            _install_wintrust_dll(dll32_path, wow64_target)
+        return
+
     if shutil.which("x86_64-w64-mingw32-gcc") is None:
         raise RuntimeError("x86_64-w64-mingw32-gcc is required to build wintrust.dll")
     build_dir = Path.home() / ".cache" / "winema3" / "wintrust"
@@ -297,18 +329,6 @@ def build_and_install_wintrust(prefix: Path, env: dict[str, str]) -> None:
         check=True,
         env=_nix_compiler_env(env),
     )
-    def _install_wintrust_dll(src: Path, dst: Path) -> None:
-        if dst.exists() and not any(dst.parent.glob("wintrust.dll.winebak.*")):
-            backup = dst.with_name(f"wintrust.dll.winebak.{_timestamp()}")
-            import os
-            os.chmod(dst, 0o644)
-            shutil.copy2(dst, backup)
-        import os
-        if dst.exists():
-            os.chmod(dst, 0o644)
-            dst.unlink()
-        shutil.copy2(src, dst)
-
     target = prefix / "drive_c/windows/system32/wintrust.dll"
     _install_wintrust_dll(dll64_path, target)
 
