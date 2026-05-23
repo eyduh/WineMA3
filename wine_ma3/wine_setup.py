@@ -27,12 +27,38 @@ HRESULT WINAPI WinVerifyTrustEx(HWND hwnd, GUID *action_id, WINTRUST_DATA *data)
     SetLastError(ERROR_SUCCESS);
     return S_OK;
 }
+
+BOOL WINAPI WintrustAddActionID(GUID *pgActionID, DWORD fdwFlags, CRYPT_REGISTER_ACTIONID *psActionID)
+{
+    SetLastError(ERROR_SUCCESS);
+    return TRUE;
+}
+
+BOOL WINAPI WintrustRemoveActionID(GUID *pgActionID)
+{
+    SetLastError(ERROR_SUCCESS);
+    return TRUE;
+}
+
+HRESULT WINAPI DllRegisterServer(void)
+{
+    return S_OK;
+}
+
+HRESULT WINAPI DllUnregisterServer(void)
+{
+    return S_OK;
+}
 """
 
 WINTRUST_DEF = """LIBRARY wintrust.dll
 EXPORTS
     WinVerifyTrust
     WinVerifyTrustEx
+    WintrustAddActionID
+    WintrustRemoveActionID
+    DllRegisterServer
+    DllUnregisterServer
 """
 
 TERMINAL_CFG = bytes.fromhex(
@@ -95,6 +121,11 @@ def install_prefix(installer: MaInstaller, repo_root: Path, *, run_installer: bo
     build_and_install_wintrust(prefix, setup_env)
     run(
         ["wine", "reg", "add", r"HKCU\Software\Wine\DllOverrides", "/v", "*wintrust", "/t", "REG_SZ", "/d", "native,builtin", "/f"],
+        check=True,
+        env=runtime_wine_env(prefix),
+    )
+    run(
+        ["wine", "reg", "add", r"HKCU\Software\Wine\WineDbg", "/v", "ShowCrashDialog", "/t", "REG_DWORD", "/d", "0", "/f"],
         check=True,
         env=runtime_wine_env(prefix),
     )
