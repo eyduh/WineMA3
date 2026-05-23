@@ -78,7 +78,7 @@ stdenv.mkDerivation {
     runHook preInstall
 
     mkdir -p $out/libexec/winema3
-    cp -r install.py probe.py uninstall.py wine_ma3 assets ma3onpcinstaller $out/libexec/winema3/
+    cp -r install.py probe.py uninstall.py wine_ma3 assets $out/libexec/winema3/
 
     # Allow overriding the repo root via environment variable so users can
     # keep their installer EXEs in a writable directory.
