@@ -3,10 +3,22 @@
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
 from .system import run
+
+
+def _find_bin(name: str, *fallbacks: str) -> str:
+    """Resolve a binary path, preferring PATH then NixOS fallbacks."""
+    found = shutil.which(name)
+    if found:
+        return found
+    for path in fallbacks:
+        if Path(path).exists():
+            return path
+    return name
 
 
 SLEEP_CONF = """[Sleep]
@@ -118,18 +130,20 @@ def disable_power_saving() -> None:
 
 def _install_user_systemd_inhibit_service() -> None:
     """Create a user systemd service that inhibits sleep via systemd-inhibit."""
+    inhibit = _find_bin("systemd-inhibit", "/run/current-system/sw/bin/systemd-inhibit")
+    sleep = _find_bin("sleep", "/run/current-system/sw/bin/sleep")
     service_dir = Path.home() / ".config/systemd/user"
     service_dir.mkdir(parents=True, exist_ok=True)
     service_file = service_dir / "winema3-inhibit.service"
     service_file.write_text(
-        """[Unit]
+        f"""[Unit]
 Description=WineMA3 inhibit sleep/idle for grandMA3 onPC
 
 [Service]
 Type=simple
 Restart=always
 RestartSec=5
-ExecStart=/usr/bin/systemd-inhibit --what=handle-lid-switch:handle-suspend-key:handle-hibernate-key:handle-power-key --who=grandMA3 --why="grandMA3 onPC show running" --mode=block sleep infinity
+ExecStart={inhibit} --what=handle-lid-switch:handle-suspend-key:handle-hibernate-key:handle-power-key --who=grandMA3 --why="grandMA3 onPC show running" --mode=block {sleep} infinity
 
 [Install]
 WantedBy=default.target
