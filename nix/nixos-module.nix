@@ -5,10 +5,12 @@ with lib;
 let
   cfg = config.programs.winema3;
 
+  onDemand = cfg.launchMode == "on-demand";
+
   noPowerSaveScript = pkgs.writeShellScript "winema3-no-power-save" ''
-    export DISPLAY="${DISPLAY:-:0}"
-    export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
-    export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+    export DISPLAY="''${DISPLAY:-:0}"
+    export XDG_RUNTIME_DIR="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    export DBUS_SESSION_BUS_ADDRESS="''${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
 
     if command -v xset >/dev/null 2>&1; then
       xset s off 2>/dev/null || true
@@ -75,6 +77,35 @@ let
     pkill -x xscreensaver 2>/dev/null || true
   '';
 
+  # Placed in PATH when launchMode = "on-demand".
+  # The grandMA3 .desktop Exec line should read:
+  #   Exec=winema3-wrap /path/to/grandma3-launcher %U
+  # Starts the firewall and inhibit services, applies power settings, waits for
+  # MA3 to exit, then tears everything back down.
+  launchWrapperBin = pkgs.writeShellScriptBin "winema3-wrap" ''
+    set -euo pipefail
+
+    cleanup() {
+      ${optionalString cfg.powerSaving.enable ''
+        systemctl --user stop winema3-inhibit.service 2>/dev/null || true
+      ''}
+      ${optionalString cfg.firewall.enable ''
+        systemctl stop winema3-firewall.service 2>/dev/null || true
+      ''}
+    }
+    trap cleanup EXIT INT TERM HUP
+
+    ${optionalString cfg.firewall.enable ''
+      systemctl start winema3-firewall.service
+    ''}
+    ${optionalString cfg.powerSaving.enable ''
+      systemctl --user start winema3-inhibit.service
+      ${noPowerSaveScript}
+    ''}
+
+    "$@"
+  '';
+
   autostartDesktop = pkgs.writeText "winema3-no-power-save.desktop" ''
     [Desktop Entry]
     Type=Application
@@ -95,12 +126,32 @@ in
       description = "The WineMA3 package to use.";
     };
 
+    launchMode = mkOption {
+      type = types.enum [ "always" "on-demand" ];
+      default = "on-demand";
+      description = ''
+        Controls when firewall ports are opened and sleep inhibition is active.
+
+        "always"    — ports open and inhibit service running at all times.
+                      Suited to a dedicated grandMA3 workstation.
+
+        "on-demand" — services start when grandMA3 is launched and stop when it
+                      exits. Requires wrapping the grandMA3 .desktop Exec with
+                      winema3-wrap:
+                        Exec=winema3-wrap /path/to/grandma3-launcher %U
+                      A polkit rule permits wheel-group users to manage the
+                      winema3-firewall system unit without a password prompt.
+      '';
+    };
+
     firewall.enable = mkOption {
       type = types.bool;
       default = true;
       description = ''
-        Whether to open MA-Net firewall ports.
-        UDP 30020 (multicast), TCP 8080 (web remote), TCP 30022-30040 (MA-Net3 alternate TCP).
+        Whether to manage MA-Net firewall ports (UDP 30020, TCP 8080 and 30022-30040).
+        In "always" mode these are static NixOS firewall rules.
+        In "on-demand" mode a system service opens/closes them around each MA3 session
+        by adding and removing a dedicated nftables table (inet winema3).
       '';
     };
 
@@ -108,8 +159,8 @@ in
       type = types.bool;
       default = true;
       description = ''
-        Whether to wrap wineserver with cap_net_raw capability.
-        This is required for MA-Net multicast networking under Wine.
+        Whether to wrap wineserver with cap_net_raw.
+        Required for MA-Net multicast networking under Wine.
       '';
     };
 
@@ -117,21 +168,62 @@ in
       type = types.bool;
       default = false;
       description = ''
-        Whether to install a user-level systemd inhibit service and idle script.
-        The inhibit service is started automatically when gma3 is launched and
-        stops when gma3 exits, scoping sleep inhibition to MA runtime only.
-        The idle script runs once per graphical login to disable screen blanking.
+        Whether to install sleep inhibition and idle-blanking suppression.
+        In "always" mode the inhibit service starts at login and the power
+        settings script runs on every graphical session start.
+        In "on-demand" mode both are scoped to the grandMA3 session via winema3-wrap.
       '';
     };
   };
 
   config = mkIf cfg.enable {
-    environment.systemPackages = [ cfg.package ];
 
-    networking.firewall = mkIf cfg.firewall.enable {
+    environment.systemPackages = [ cfg.package ]
+      ++ optional onDemand launchWrapperBin;
+
+    # ── Firewall ──────────────────────────────────────────────────────────────
+
+    # Static rules for "always" mode.
+    networking.firewall = mkIf (cfg.firewall.enable && !onDemand) {
       allowedUDPPorts = [ 30020 ];
       allowedTCPPorts = [ 8080 ] ++ builtins.genList (n: 30022 + n) 19;
     };
+
+    # Dynamic system service for "on-demand" mode.
+    # Uses its own nftables table so it never touches the nixos-fw ruleset —
+    # the whole table is atomically dropped on stop.
+    systemd.services.winema3-firewall = mkIf (cfg.firewall.enable && onDemand) {
+      description = "WineMA3 firewall rules for grandMA3 onPC";
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        ExecStart = pkgs.writeShellScript "winema3-fw-start" ''
+          ${pkgs.nftables}/bin/nft add table inet winema3
+          ${pkgs.nftables}/bin/nft add chain inet winema3 input \
+            '{ type filter hook input priority -1; policy accept; }'
+          ${pkgs.nftables}/bin/nft add rule inet winema3 input \
+            tcp dport { 8080, 30022-30040 } accept
+          ${pkgs.nftables}/bin/nft add rule inet winema3 input \
+            udp dport 30020 accept
+        '';
+        ExecStop = pkgs.writeShellScript "winema3-fw-stop" ''
+          ${pkgs.nftables}/bin/nft delete table inet winema3 2>/dev/null || true
+        '';
+      };
+    };
+
+    # Permit wheel-group users to start/stop the firewall unit without a prompt.
+    security.polkit.extraConfig = mkIf (cfg.firewall.enable && onDemand) ''
+      polkit.addRule(function(action, subject) {
+        if (action.id === "org.freedesktop.systemd1.manage-units" &&
+            action.lookup("unit") === "winema3-firewall.service" &&
+            subject.isInGroup("wheel")) {
+          return polkit.Result.YES;
+        }
+      });
+    '';
+
+    # ── Wine capabilities ─────────────────────────────────────────────────────
 
     security.wrappers.wineserver = mkIf cfg.wineserver.capNetRaw {
       setuid = false;
@@ -141,8 +233,13 @@ in
       source = "${pkgs.wineWow64Packages.full}/bin/wineserver";
     };
 
+    # ── Sleep inhibition ──────────────────────────────────────────────────────
+
+    # "always" mode: wantedBy causes it to start at login.
+    # "on-demand" mode: no wantedBy — winema3-wrap starts/stops it explicitly.
     systemd.user.services.winema3-inhibit = mkIf cfg.powerSaving.enable {
       description = "WineMA3 inhibit sleep/idle for grandMA3 onPC";
+      wantedBy = optional (!onDemand) "default.target";
       serviceConfig = {
         Type = "simple";
         Restart = "always";
@@ -151,8 +248,12 @@ in
       };
     };
 
-    environment.etc."xdg/autostart/winema3-no-power-save.desktop" = mkIf cfg.powerSaving.enable {
-      source = autostartDesktop;
-    };
+    # ── Idle-blanking suppression (always mode only) ───────────────────────────
+
+    # In "on-demand" mode the power script is called by winema3-wrap instead.
+    environment.etc."xdg/autostart/winema3-no-power-save.desktop" =
+      mkIf (cfg.powerSaving.enable && !onDemand) {
+        source = autostartDesktop;
+      };
   };
 }
