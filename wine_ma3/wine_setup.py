@@ -69,8 +69,46 @@ TERMINAL_CFG = bytes.fromhex(
 )
 
 
+def _xdg_data_home() -> Path:
+    return Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local/share"))
+
+
 def prefix_path(installer: MaInstaller) -> Path:
-    return Path.home() / installer.prefix_name
+    # The Wine prefix is regenerable state, so it lives in the XDG data dir (not a dotdir in
+    # $HOME). User show data is externalised under grandMA3/ (see link_user_data_dirs) so the
+    # prefix itself can be treated as disposable / excluded from backups.
+    return _xdg_data_home() / "winema3" / installer.install_dir_name
+
+
+def _user_data_root() -> Path:
+    return _xdg_data_home() / "grandMA3"
+
+
+def link_user_data_dirs(installer: MaInstaller) -> None:
+    """Relocate MA3 user data (shows, backups, cross-version library) to a stable XDG path and
+    symlink it back into the prefix, so it survives prefix wipes and version bumps and can be
+    backed up independently of the disposable prefix. Idempotent."""
+    prefix = prefix_path(installer)
+    shared = (
+        prefix / "drive_c/ProgramData/MALightingTechnology" / installer.install_dir_name / "shared"
+    )
+    library = prefix / "drive_c/ProgramData/MALightingTechnology/gma3_library"
+    root = _user_data_root()
+    root.mkdir(parents=True, exist_ok=True)
+    for src, name in [(shared / "shows", "shows"), (shared / "backups", "backups"), (library, "library")]:
+        dst = root / name
+        if src.is_symlink():
+            continue
+        src.parent.mkdir(parents=True, exist_ok=True)
+        if not dst.exists():
+            if src.exists():
+                shutil.move(str(src), str(dst))
+            else:
+                dst.mkdir(parents=True, exist_ok=True)
+        elif src.exists():
+            # XDG target already holds the real data; drop the freshly-created default in the prefix
+            shutil.rmtree(str(src))
+        src.symlink_to(dst)
 
 
 def wine_env(prefix: Path) -> dict[str, str]:
@@ -129,6 +167,7 @@ def install_prefix(installer: MaInstaller, repo_root: Path, *, run_installer: bo
         check=True,
         env=runtime_wine_env(prefix),
     )
+    link_user_data_dirs(installer)
     create_launchers(installer)
 
 
@@ -365,7 +404,7 @@ def create_launchers(installer: MaInstaller) -> None:
 
 
 def _launcher(installer: MaInstaller, wine_command: str, log_name: str, *, is_nixos: bool = False) -> str:
-    prefix = f'$HOME/{installer.prefix_name}'
+    prefix = f'${{XDG_DATA_HOME:-$HOME/.local/share}}/winema3/{installer.install_dir_name}'
     shebang = "#!/usr/bin/env bash"
     if is_nixos:
         shebang = "#!/usr/bin/env nix-shell\n#! nix-shell -i bash -p wineWow64Packages.full dxvk"
