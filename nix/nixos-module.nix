@@ -115,6 +115,45 @@ let
     OnlyShowIn=GNOME;KDE;XFCE;LXDE;LXQt;MATE;Cinnamon;
     X-GNOME-Autostart-enabled=true
   '';
+
+  # Declarative launcher: discovers the newest Wine prefix under XDG at runtime
+  # and starts grandMA3 onPC. Named gma3-wine so it never collides with (or
+  # shadows) the native grandma3-nix `gma3`. Shipped via the module so removing
+  # the module removes it — nothing lingers in $HOME.
+  wineLauncher = pkgs.writeShellScriptBin "gma3-wine" ''
+    set -u
+    export DISPLAY="''${DISPLAY:-:0}"
+    export XDG_RUNTIME_DIR="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    export DBUS_SESSION_BUS_ADDRESS="''${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+
+    base="''${XDG_DATA_HOME:-$HOME/.local/share}/winema3"
+    prefix=$(${pkgs.coreutils}/bin/ls -d "$base"/gma3_* 2>/dev/null | ${pkgs.coreutils}/bin/sort -V | ${pkgs.coreutils}/bin/tail -1 || true)
+    if [ -z "''${prefix:-}" ]; then
+      echo "No WineMA3 prefix found under $base — run the installer first." >&2
+      exit 1
+    fi
+    ver=$(${pkgs.coreutils}/bin/basename "$prefix")
+
+    export WINEPREFIX="$prefix"
+    export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+    export MESA_GL_VERSION_OVERRIDE=4.2 MESA_GLSL_VERSION_OVERRIDE=420
+    export WINEDLLOVERRIDES='wintrust=n,b;dxgi,d3d11=n'
+
+    cd "$prefix/drive_c/Program Files/MALightingTechnology/$ver/bin" || exit 1
+    exec ${pkgs.wineWow64Packages.full}/bin/wine "''${WINEMA3_APP:-app_system.exe}" HOSTTYPE=onPC "$@"
+  '';
+
+  wineDesktop = pkgs.makeDesktopItem {
+    name = "grandMA3-wine";
+    desktopName = "grandMA3 (Wine)";
+    genericName = "Lighting Console";
+    comment = "grandMA3 onPC via Wine (WineMA3)";
+    exec = "${wineLauncher}/bin/gma3-wine";
+    categories = [ "AudioVideo" ];
+    keywords = [ "grandMA3" "MA3" "lighting" "onPC" "wine" ];
+    startupWMClass = "app_system.exe";
+    terminal = false;
+  };
 in
 {
   options.programs.winema3 = {
@@ -178,8 +217,12 @@ in
 
   config = mkIf cfg.enable {
 
-    environment.systemPackages = [ cfg.package ]
+    environment.systemPackages = [ cfg.package wineLauncher wineDesktop ]
       ++ optional onDemand launchWrapperBin;
+
+    # Tell the runtime installer the module owns the launcher/desktop entry, so
+    # it writes nothing into $HOME (which would linger after module removal).
+    environment.sessionVariables.WINEMA3_MANAGED = "1";
 
     # ── Firewall ──────────────────────────────────────────────────────────────
 

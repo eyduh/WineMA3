@@ -390,6 +390,12 @@ def _timestamp() -> str:
 
 
 def create_launchers(installer: MaInstaller) -> None:
+    # When the NixOS module manages WineMA3 it ships the launchers and desktop
+    # entry declaratively (so they're removed when the module is removed).
+    # Writing them here would leave user-space artifacts that linger forever, so
+    # skip all $HOME writes in that case.
+    if os.environ.get("WINEMA3_MANAGED") == "1":
+        return
     prefix = prefix_path(installer)
     bin_dir = prefix / "drive_c/Program Files/MALightingTechnology" / installer.install_dir_name / "bin"
     local_bin = Path.home() / ".local/bin"
