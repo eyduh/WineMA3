@@ -140,7 +140,20 @@ let
     export WINEDLLOVERRIDES='wintrust=n,b;dxgi,d3d11=n'
 
     cd "$prefix/drive_c/Program Files/MALightingTechnology/$ver/bin" || exit 1
-    exec ${pkgs.wineWow64Packages.full}/bin/wine "''${WINEMA3_APP:-app_system.exe}" HOSTTYPE=onPC "$@"
+
+    # app_system.exe is a launcher: it spawns the real console process and the
+    # initial wine client returns early. When started from the KDE .desktop entry
+    # (Terminal=false) the app runs inside a transient app-*@.service scope, so
+    # once this launcher's main PID exits, KillMode=control-group reaps the
+    # console — it dies ~10s after the requirement dialog. Running in a terminal
+    # hid this because there was no cgroup teardown.
+    #
+    # Run wine in the foreground (guarantees the server is up when it returns),
+    # then block on `wineserver -w`, which waits until every wine process in the
+    # prefix has exited. That keeps this launcher — hence the scope's main PID —
+    # alive for the whole session without needing a terminal.
+    ${pkgs.wineWow64Packages.full}/bin/wine "''${WINEMA3_APP:-app_system.exe}" HOSTTYPE=onPC "$@" || true
+    exec ${pkgs.wineWow64Packages.full}/bin/wineserver -w
   '';
 
   wineDesktop = pkgs.makeDesktopItem {
