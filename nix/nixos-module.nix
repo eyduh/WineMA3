@@ -161,12 +161,13 @@ let
     desktopName = "grandMA3 (Wine)";
     genericName = "Lighting Console";
     comment = "grandMA3 onPC via Wine (WineMA3)";
+    # Reference the binaries by name (they're in systemPackages, hence on the
+    # session PATH) rather than by absolute store path — this keeps the entry
+    # valid across rebuilds and avoids stranding on a garbage-collected path.
     # In on-demand mode wrap through winema3-wrap so launching from the menu
     # opens the MA-Net firewall ports (and starts inhibit) for the session and
     # closes them again on exit. Without this the console can't reach the PC.
-    exec =
-      (optionalString onDemand "${launchWrapperBin}/bin/winema3-wrap ")
-      + "${wineLauncher}/bin/gma3-wine";
+    exec = (optionalString onDemand "winema3-wrap ") + "gma3-wine";
     categories = [ "AudioVideo" ];
     keywords = [ "grandMA3" "MA3" "lighting" "onPC" "wine" ];
     startupWMClass = "app_system.exe";
