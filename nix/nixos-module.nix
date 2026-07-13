@@ -170,7 +170,11 @@ let
     categories = [ "AudioVideo" ];
     keywords = [ "grandMA3" "MA3" "lighting" "onPC" "wine" ];
     startupWMClass = "app_system.exe";
-    terminal = false;
+    # Run in a terminal: launching from a Terminal=false .desktop lands the
+    # process in a transient KDE app scope whose control-group teardown reaps
+    # the console (and, with winema3-wrap in front, the launch fails outright).
+    # A real terminal sidesteps that and reliably keeps the session alive.
+    terminal = true;
   };
 in
 {
@@ -253,28 +257,40 @@ in
       allowedTCPPorts = [ 8080 ] ++ builtins.genList (n: 30022 + n) 19;
     };
 
-    # Dynamic system service for "on-demand" mode.
-    # Uses its own nftables table so it never touches the nixos-fw ruleset —
-    # the whole table is atomically dropped on stop.
+    # Dynamic system service for "on-demand" mode: insert accept rules directly
+    # into the live nixos-fw chain around each MA3 session, and remove them on
+    # stop. A separate nftables table does NOT work — its accept is overridden
+    # by the nixos-fw drop, because across base chains on the same hook a drop
+    # verdict is terminal while an accept only passes to the next chain. So the
+    # ports must be opened in nixos-fw itself. Requires the iptables backend
+    # (see the assertion below); use launchMode = "always" on nftables hosts.
     systemd.services.winema3-firewall = mkIf (cfg.openFirewall && onDemand) {
       description = "WineMA3 firewall rules for grandMA3 onPC";
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
         ExecStart = pkgs.writeShellScript "winema3-fw-start" ''
-          ${pkgs.nftables}/bin/nft add table inet winema3
-          ${pkgs.nftables}/bin/nft add chain inet winema3 input \
-            '{ type filter hook input priority -1; policy accept; }'
-          ${pkgs.nftables}/bin/nft add rule inet winema3 input \
-            tcp dport { 8080, 30022-30040 } accept
-          ${pkgs.nftables}/bin/nft add rule inet winema3 input \
-            udp dport 30020 accept
+          ${pkgs.iptables}/bin/iptables -I nixos-fw -p udp --dport 30020 -j nixos-fw-accept
+          ${pkgs.iptables}/bin/iptables -I nixos-fw -p tcp -m multiport --dports 8080,30022:30040 -j nixos-fw-accept
         '';
         ExecStop = pkgs.writeShellScript "winema3-fw-stop" ''
-          ${pkgs.nftables}/bin/nft delete table inet winema3 2>/dev/null || true
+          ${pkgs.iptables}/bin/iptables -D nixos-fw -p udp --dport 30020 -j nixos-fw-accept 2>/dev/null || true
+          ${pkgs.iptables}/bin/iptables -D nixos-fw -p tcp -m multiport --dports 8080,30022:30040 -j nixos-fw-accept 2>/dev/null || true
         '';
       };
     };
+
+    assertions = [
+      {
+        assertion = !(cfg.openFirewall && onDemand) || !config.networking.nftables.enable;
+        message = ''
+          programs.winema3: on-demand openFirewall supports the iptables firewall
+          backend only (it edits the nixos-fw chain at runtime). Either set
+          networking.nftables.enable = false, or use launchMode = "always" to get
+          static declarative firewall rules instead.
+        '';
+      }
+    ];
 
     # Permit wheel-group users to start/stop the firewall unit without a prompt.
     security.polkit.extraConfig = mkIf (cfg.openFirewall && onDemand) ''
