@@ -23,13 +23,16 @@ Wine prefix.
   redistributed here and is supplied at runtime, never copied into the Nix
   store.
 
-Two supported setups:
+Supported setups:
 
 - **NixOS** — import the [NixOS module](#nixos-module) for a fully declarative
   launcher, firewall, `wineserver` capabilities, and sleep inhibition.
-- **Non-NixOS with Nix** (any distro, or the Nix package manager on macOS-less
-  Linux hosts) — install the package into your Nix profile and let the installer
-  handle firewall/capabilities/power itself. See
+- **Home Manager** — import the [Home Manager module](#home-manager-module) for a
+  per-user launcher, menu entry, and keep-awake behaviour. Firewall and
+  `wineserver` capabilities need root, so they're handled by the NixOS module or
+  the installer's prompts.
+- **Non-NixOS with Nix** (any distro) — install the package into your Nix
+  profile and let the installer handle firewall/capabilities/power itself. See
   [Non-NixOS hosts](#non-nixos-hosts).
 
 ## Flake Outputs
@@ -175,6 +178,56 @@ runtime.
 > chain at runtime and therefore requires the **iptables** firewall backend. An
 > assertion enforces this — either set `networking.nftables.enable = false`, or
 > use `launchMode = "always"` (static rules) on nftables hosts.
+
+## Home Manager Module
+
+A Home Manager module (`homeModules.default`) is available for managing the
+launcher per-user without NixOS. Because Home Manager only manages user-scope
+state, it is a **subset** of the NixOS module: it handles the launcher, menu
+entry, and keep-awake behaviour, but **not** the firewall or `wineserver`
+capabilities (those require root).
+
+```nix
+{
+  inputs.winema3.url = "github:eyduh/WineMA3";
+
+  # In your Home Manager configuration:
+  imports = [ winema3.homeModules.default ];
+
+  programs.winema3 = {
+    enable = true;
+    launchMode = "on-demand";   # "always" | "on-demand"
+    keepAwake = false;
+  };
+}
+```
+
+What the Home Manager module reproduces vs. the NixOS module:
+
+| Functionality | Home Manager | NixOS |
+|---|:---:|:---:|
+| Install package + `gma3-wine` launcher | ✅ | ✅ |
+| **grandMA3 (Wine)** menu entry | ✅ | ✅ |
+| `WINEMA3_MANAGED` marker | ✅ | ✅ |
+| `keepAwake` sleep inhibition (user service) | ✅ | ✅ |
+| `keepAwake` idle/DPMS/screensaver suppression | ✅ | ✅ |
+| `launchMode` scoping of the above | ✅ | ✅ |
+| `openFirewall` (MA-Net ports) | ❌ needs root | ✅ |
+| `wineserver` `cap_net_raw` | ❌ needs root | ✅ |
+| polkit rule for the firewall unit | ❌ needs root | ✅ |
+
+Options are the same as the NixOS module minus the privileged ones —
+`enable`, `package`, `launchMode`, and `keepAwake` (there is no `openFirewall`
+or `wineserver.capNetRaw`). Enabling it emits a `warning` reminding you that
+MA-Net networking must be handled elsewhere.
+
+For the networking side, pair it with:
+
+- the [NixOS module](#nixos-module) or a few lines of `networking.firewall` /
+  `security.wrappers` in your system config (Home Manager on NixOS), or
+- the `winema3-install` runtime prompts, which apply firewall rules and
+  `setcap cap_net_raw` via sudo (Home Manager on another distro — see
+  [Non-NixOS hosts](#non-nixos-hosts)).
 
 ## Launching
 

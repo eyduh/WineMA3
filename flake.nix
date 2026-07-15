@@ -81,5 +81,8 @@
 
       nixosModules.default = import ./nix/nixos-module.nix;
       nixosModules.winema3 = import ./nix/nixos-module.nix;
+
+      homeModules.default = import ./nix/home-module.nix;
+      homeModules.winema3 = import ./nix/home-module.nix;
     };
 }
