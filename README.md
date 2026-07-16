@@ -387,6 +387,39 @@ The desktop entry runs in a terminal on purpose: launching from a
 `Terminal=false` entry lands the process in a transient KDE app scope whose
 control-group teardown reaps the onPC console shortly after start.
 
+## Prebuilt Prefix (unfree, private cache)
+
+To avoid re-running the installer on every device, the flake can build the
+**fully-installed onPC Wine prefix once** and let your other machines pull it
+from a binary cache — the same idea as caching any package.
+
+- `packages.onpc-prefix` (`nix/onpc-prefix.nix`) runs the onPC installer + DXVK +
+  wintrust headlessly at build time and captures the finished prefix as a store
+  path.
+- `packages.winema3-install-prefix` copies that store prefix into
+  `~/.local/share/winema3/` on a device (`nix run .#winema3-install-prefix`),
+  which is all a device then needs before `gma3-wine`.
+
+Two hard rules, modelled on nixpkgs' `davinci-resolve`:
+
+1. **Unfree + you supply the installer.** grandMA3 onPC is proprietary MA
+   Lighting software. `onpc-prefix` is marked `license = lib.licenses.unfree`
+   (build requires `NIXPKGS_ALLOW_UNFREE=1` / `nixpkgs.config.allowUnfree`), and
+   the installer comes in via `requireFile` — it is never redistributed by this
+   flake. Provide it once:
+   ```bash
+   nix hash file grandMA3_onPC_win_v2.3.2.0.zip     # put this in nix/onpc-prefix.nix (src.sha256)
+   nix store add-file --name grandMA3_onPC_win_v2.3.2.0.zip /path/to/it
+   ```
+2. **Private cache only.** Serving the built prefix from a *public* cache
+   redistributes MA's software and violates their EULA. Build it on a licensed
+   machine and serve it over a **private/authenticated** cache (e.g. Harmonia on
+   your own host) to your own devices.
+
+> Status: the build runs the MA installer under a headless `Xvfb` inside the Nix
+> sandbox. This is the least-portable part (wine-prefix creation isn't fully
+> hermetic) and should be built on a real licensed host, not CI.
+
 ## Networking
 
 MA-Net3 uses UDP multicast on port `30020` (commonly `236.4.x.x`); Web Remote

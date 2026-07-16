@@ -18,11 +18,44 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
         wineMa3 = pkgs.callPackage ./nix/package.nix { };
+
+        # Prebuilt, UNFREE grandMA3 onPC Wine prefix (you supply the installer via
+        # requireFile). Building it needs allowUnfree; see nix/onpc-prefix.nix. Once
+        # built (e.g. on a licensed machine) it can be served from a PRIVATE binary
+        # cache and pulled by your other devices, skipping the runtime install.
+        onpcPrefix = pkgs.callPackage ./nix/onpc-prefix.nix {
+          winema3 = wineMa3;
+          xvfb = pkgs."xorg-server";
+        };
+
+        # Copies the prebuilt prefix into the writable XDG location the launcher
+        # reads. Run once per device: `nix run .#winema3-install-prefix`.
+        installPrefixApp = pkgs.writeShellApplication {
+          name = "winema3-install-prefix";
+          runtimeInputs = [ pkgs.coreutils ];
+          text = ''
+            dest="''${XDG_DATA_HOME:-$HOME/.local/share}/winema3"
+            target="$dest/gma3_2.3.2"
+            mkdir -p "$dest"
+            if [ -e "$target" ]; then
+              echo "A prefix already exists at $target." >&2
+              echo "Remove it first if you want to replace it with the prebuilt one." >&2
+              exit 1
+            fi
+            echo "Copying prebuilt grandMA3 onPC prefix into $target ..."
+            cp -r --no-preserve=mode,ownership "${onpcPrefix}/gma3_2.3.2" "$target"
+            chmod -R u+w "$target"
+            echo "Done. Launch with gma3-wine."
+          '';
+        };
       in
       {
         packages = {
           default = wineMa3;
           winema3 = wineMa3;
+          # Unfree — build with NIXPKGS_ALLOW_UNFREE=1 (or nixpkgs.config.allowUnfree).
+          onpc-prefix = onpcPrefix;
+          winema3-install-prefix = installPrefixApp;
         };
 
         apps = {
