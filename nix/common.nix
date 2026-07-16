@@ -93,7 +93,13 @@ rec {
   # and starts grandMA3 onPC. Named gma3-wine so it never collides with (or
   # shadows) the native grandma3-nix `gma3`. Shipped via the module so removing
   # the module removes it — nothing lingers in $HOME.
-  wineLauncher = pkgs.writeShellScriptBin "gma3-wine" ''
+  #
+  # nixGLPrefix is prepended to the wine invocation. On a non-NixOS host the
+  # Nix-built wine cannot reach the system GPU driver, so grandMA3 aborts with
+  # "Application needs opengl >= 4.3"; routing wine through nixGL (GL + Vulkan
+  # for DXVK) injects the host drivers. Empty on NixOS, where /run/opengl-driver
+  # already provides them.
+  mkWineLauncher = { nixGLPrefix ? "" }: pkgs.writeShellScriptBin "gma3-wine" ''
     set -u
     export DISPLAY="''${DISPLAY:-:0}"
     export XDG_RUNTIME_DIR="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
@@ -125,7 +131,7 @@ rec {
     # then block on `wineserver -w`, which waits until every wine process in the
     # prefix has exited. That keeps this launcher — hence the scope's main PID —
     # alive for the whole session without needing a terminal.
-    ${pkgs.wineWow64Packages.full}/bin/wine "''${WINEMA3_APP:-app_system.exe}" HOSTTYPE=onPC "$@" || true
+    ${nixGLPrefix}${pkgs.wineWow64Packages.full}/bin/wine "''${WINEMA3_APP:-app_system.exe}" HOSTTYPE=onPC "$@" || true
     exec ${pkgs.wineWow64Packages.full}/bin/wineserver -w
   '';
 

@@ -303,6 +303,26 @@ Options are the same as the NixOS module minus the privileged ones —
 or `wineserver.capNetRaw`). Enabling it emits a `warning` reminding you that
 MA-Net networking must be handled elsewhere.
 
+### OpenGL/Vulkan on non-NixOS (automatic nixGL)
+
+On a non-NixOS host the Nix-built wine can't reach the system GPU driver, so
+grandMA3 aborts at launch with **"Application needs opengl >= 4.3"**. The Home
+Manager module handles this automatically: when **`targets.genericLinux.enable =
+true`** (Home Manager's standard "not on NixOS" switch), `gma3-wine` routes wine
+through [nixGL](https://github.com/nix-community/nixGL) — `nixGLIntel` for
+OpenGL (the Mesa wrapper, which also covers AMD `radeonsi`/RADV despite the name)
+and `nixVulkanIntel` for the Vulkan ICD that DXVK needs. nixGL is bundled as a
+flake input, so there's nothing extra to configure beyond enabling
+`targets.genericLinux`.
+
+```nix
+targets.genericLinux.enable = true;   # required on non-NixOS for GL/Vulkan
+programs.winema3.enable = true;
+```
+
+On NixOS the wrapper is omitted (the system provides `/run/opengl-driver`), so
+nixGL is never pulled into the closure.
+
 For the networking side, pair it with:
 
 - the [NixOS module](#nixos-module) or a few lines of `networking.firewall` /

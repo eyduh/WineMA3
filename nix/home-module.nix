@@ -12,6 +12,10 @@
 # For the networking bits, either use the NixOS module (on NixOS) or let the
 # `winema3-install` runtime installer apply them via its own sudo-gated prompts
 # (on other distros). See the README.
+#
+# `nixgl` is the nix-community/nixGL flake, injected by flake.nix — used to make
+# OpenGL/Vulkan work under wine on non-NixOS hosts (see nixGLPrefix below).
+{ nixgl }:
 { config, lib, pkgs, ... }:
 
 with lib;
@@ -23,7 +27,20 @@ let
 
   # Shared user-scope building blocks (also used by the NixOS module).
   common = import ./common.nix { inherit pkgs lib; };
-  inherit (common) noPowerSaveScript autostartDesktop wineLauncher;
+  inherit (common) noPowerSaveScript autostartDesktop;
+
+  # On a non-NixOS host the Nix-built wine can't reach the system GPU driver, so
+  # grandMA3 aborts with "Application needs opengl >= 4.3". Route wine through
+  # nixGL — nixGLIntel is the Mesa wrapper (covers AMD radeonsi/RADV, despite the
+  # "Intel" name) for OpenGL, and nixVulkanIntel supplies the Mesa Vulkan ICD
+  # that DXVK needs. We key off targets.genericLinux.enable, Home Manager's
+  # standard "not on NixOS" signal, so NixOS-HM users don't pull nixGL in.
+  nixGLPkgs = nixgl.packages.${pkgs.stdenv.hostPlatform.system};
+  useNixGL = config.targets.genericLinux.enable;
+  nixGLPrefix = optionalString useNixGL
+    "${nixGLPkgs.nixGLIntel}/bin/nixGLIntel ${nixGLPkgs.nixVulkanIntel}/bin/nixVulkanIntel ";
+
+  wineLauncher = common.mkWineLauncher { inherit nixGLPrefix; };
 
   # winema3-wrap is only meaningful here when it has something to do — i.e. when
   # keepAwake scopes the inhibit service + power settings to a launch. Unlike the

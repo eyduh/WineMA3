@@ -4,9 +4,13 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    nixgl = {
+      url = "github:nix-community/nixGL";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, nixgl }:
     let
       supportedSystems = [ "x86_64-linux" ];
     in
@@ -82,7 +86,7 @@
       nixosModules.default = import ./nix/nixos-module.nix;
       nixosModules.winema3 = import ./nix/nixos-module.nix;
 
-      homeModules.default = import ./nix/home-module.nix;
-      homeModules.winema3 = import ./nix/home-module.nix;
+      homeModules.default = import ./nix/home-module.nix { inherit nixgl; };
+      homeModules.winema3 = import ./nix/home-module.nix { inherit nixgl; };
     };
 }

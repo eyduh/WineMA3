@@ -9,7 +9,10 @@ let
 
   # Shared user-scope building blocks (also used by the Home Manager module).
   common = import ./common.nix { inherit pkgs lib; };
-  inherit (common) noPowerSaveScript autostartDesktop wineLauncher;
+  inherit (common) noPowerSaveScript autostartDesktop;
+
+  # NixOS has /run/opengl-driver, so no nixGL wrapping is needed.
+  wineLauncher = common.mkWineLauncher { };
 
   # Placed in PATH when launchMode = "on-demand". The shipped "grandMA3 (Wine)"
   # .desktop entry runs its launcher through this wrapper automatically:
