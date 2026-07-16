@@ -146,9 +146,36 @@ Add the flake to your `inputs` and pass it through to your system (`specialArgs`
 or the `nixpkgs.lib.nixosSystem` modules list) so `winema3.nixosModules.default`
 is in scope.
 
-You still install the MA3 onPC build once with `winema3-install` (the module
-puts the installer package on `PATH`); the module manages everything around the
-runtime.
+### Setup, end to end
+
+Getting from nothing to a running console is a **two-phase** process: the module
+is declarative Nix, but the Wine prefix is populated once by an imperative
+installer run, and you launch with an ordinary command. In order:
+
+1. **Get the installer** (not Nix). Download the Windows grandMA3 onPC EXE/ZIP
+   from MA Lighting and drop it in the installer directory:
+   ```bash
+   mkdir -p ~/.local/share/winema3/ma3onpcinstaller
+   cp grandMA3_onPC_win_v*.zip ~/.local/share/winema3/ma3onpcinstaller/
+   ```
+2. **Enable the module** (Nix). Add the `programs.winema3` block above and
+   rebuild:
+   ```bash
+   sudo nixos-rebuild switch --flake .#<host>
+   ```
+   This installs the launcher, desktop entry, firewall rules, and the
+   `winema3-install` package on `PATH` — but does **not** create the prefix yet.
+3. **Populate the Wine prefix** (Nix, one time). Run the installer once; it
+   creates the prefix, installs onPC, DXVK, and the wintrust stub:
+   ```bash
+   winema3-install
+   ```
+   The module sets `WINEMA3_MANAGED=1`, so this writes nothing into `$HOME` —
+   it only fills the prefix under `~/.local/share/winema3/`.
+4. **Launch** (not Nix). `gma3-wine`, or the **grandMA3 (Wine)** menu entry.
+
+Re-run step 3 only to upgrade onPC or repair the prefix; steps 2 and 4 are the
+everyday path.
 
 ### Options
 
@@ -228,6 +255,44 @@ For the networking side, pair it with:
 - the `winema3-install` runtime prompts, which apply firewall rules and
   `setcap cap_net_raw` via sudo (Home Manager on another distro — see
   [Non-NixOS hosts](#non-nixos-hosts)).
+
+### Setup, end to end
+
+Same **two-phase** shape as the NixOS module — declarative Home Manager to place
+the launcher, then a one-time imperative installer run, then launch. In order:
+
+1. **Get the installer** (not Nix). Download the onPC EXE/ZIP from MA Lighting:
+   ```bash
+   mkdir -p ~/.local/share/winema3/ma3onpcinstaller
+   cp grandMA3_onPC_win_v*.zip ~/.local/share/winema3/ma3onpcinstaller/
+   ```
+2. **Enable the module** (Nix). Add the `programs.winema3` block above and
+   activate:
+   ```bash
+   home-manager switch --flake .#<you>
+   ```
+   This puts `gma3-wine`, the menu entry, and the `winema3-install` package on
+   your PATH.
+3. **Populate the Wine prefix** (Nix, one time). Run the installer with
+   `WINEMA3_MANAGED=1` set explicitly — this guarantees it writes nothing into
+   `$HOME` (no stray `~/.local/bin/gma3`), regardless of which shell you launch
+   from:
+   ```bash
+   WINEMA3_MANAGED=1 winema3-install
+   ```
+   On a non-NixOS host it will also prompt for the firewall rules and
+   `setcap cap_net_raw` (the parts Home Manager can't do declaratively) — accept
+   them.
+4. **Launch** (not Nix). `gma3-wine`, or the **grandMA3 (Wine)** menu entry.
+
+> **Why `WINEMA3_MANAGED=1` in step 3?** The module sets it via
+> `home.sessionVariables`, but that only loads in shells that source
+> `hm-session-vars.sh`. If you run the installer from a shell that hasn't, it
+> thinks it's unmanaged and writes `~/.local/bin/gma3` — a launcher that calls
+> bare `wine`, which isn't on your PATH under Nix (wine lives in the store, only
+> `gma3-wine` references it by full path). Setting the var inline avoids that.
+> If you already have stray launchers, remove them:
+> `rm -f ~/.local/bin/gma3 ~/.local/bin/gma3term ~/.local/share/applications/grandMA3*.desktop`.
 
 ## Launching
 
