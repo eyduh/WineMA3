@@ -179,29 +179,39 @@ def _is_nixos() -> bool:
 
 def install_dxvk(env: dict[str, str]) -> None:
     attempts: list[str] = []
+
+    # setup_dxvk.sh ships with the nixpkgs `dxvk` package, with the DLL locations
+    # baked in as absolute store paths. Its presence on PATH means we're running
+    # under the Nix packaging — on ANY distro, not just NixOS — so prefer it. It's
+    # also more reliable than winetricks, which can't detect the wow64 Wine build
+    # (`Unknown file arch of .../wine`) and bails before installing anything.
+    if shutil.which("setup_dxvk.sh"):
+        if _try_dxvk_command(["setup_dxvk.sh", "install"], env, attempts):
+            return
+
     if shutil.which("winetricks"):
         if _try_dxvk_command(["winetricks", "-q", "dxvk"], env, attempts):
             return
     if shutil.which("dxvk-setup"):
         if _try_dxvk_command(["dxvk-setup", "install"], env, attempts):
             return
-    if _is_nixos():
-        # Prefer the official nixpkgs setup_dxvk.sh when available
-        if shutil.which("setup_dxvk.sh"):
-            if _try_dxvk_command(["setup_dxvk.sh", "install"], env, attempts):
-                return
-        # Fallback to manual copy from nix store
-        dxvk_path = _find_nixos_dxvk()
-        if dxvk_path:
-            _install_dxvk_from_path(dxvk_path, env)
-            return
-        attempts.append("NixOS: DXVK setup failed. Neither setup_dxvk.sh nor dxvk package found.")
+
+    # Fallback: copy the DLLs directly from a DXVK directory (DXVK_PATH, a dxvk
+    # dir on PATH, or one in the nix store) for older dxvk layouts that ship the
+    # DLLs rather than a setup script.
+    dxvk_path = _find_dxvk_dir()
+    if dxvk_path:
+        _install_dxvk_from_path(dxvk_path, env)
+        return
+
     if not attempts:
-        raise RuntimeError("DXVK setup requires either winetricks or Debian's dxvk-setup")
+        raise RuntimeError(
+            "DXVK setup requires setup_dxvk.sh, winetricks, or Debian's dxvk-setup"
+        )
     raise RuntimeError("DXVK setup failed:\n\n" + "\n\n".join(attempts))
 
 
-def _find_nixos_dxvk() -> Path | None:
+def _find_dxvk_dir() -> Path | None:
     import os
     env_path = os.environ.get("DXVK_PATH")
     if env_path and Path(env_path).joinpath("x64/d3d11.dll").exists():
