@@ -115,7 +115,9 @@ rec {
 
     export WINEPREFIX="$prefix"
     export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
-    export MESA_GL_VERSION_OVERRIDE=4.2 MESA_GLSL_VERSION_OVERRIDE=420
+    # grandMA3 onPC requires OpenGL >= 4.3; 4.2 here capped it below that and
+    # tripped "Application needs opengl >= 4.3". radeonsi/RADV support 4.6.
+    export MESA_GL_VERSION_OVERRIDE=4.6 MESA_GLSL_VERSION_OVERRIDE=460
     export WINEDLLOVERRIDES='wintrust=n,b;dxgi,d3d11=n'
 
     cd "$prefix/drive_c/Program Files/MALightingTechnology/$ver/bin" || exit 1

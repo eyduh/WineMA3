@@ -31,16 +31,28 @@ let
 
   # On a non-NixOS host the Nix-built wine can't reach the system GPU driver, so
   # grandMA3 aborts with "Application needs opengl >= 4.3". Route wine through
-  # nixGL — nixGLIntel is the Mesa wrapper (covers AMD radeonsi/RADV, despite the
-  # "Intel" name) for OpenGL, and nixVulkanIntel supplies the Mesa Vulkan ICD
-  # that DXVK needs. We key off targets.genericLinux.enable, Home Manager's
-  # standard "not on NixOS" signal, so NixOS-HM users don't pull nixGL in.
+  # nixGL — for OpenGL AND the Vulkan ICD that DXVK needs.
+  #
+  # Prefer the user's own nixGL Home Manager module when present: wrapping the
+  # launcher with `config.lib.nixGL.wrap` reuses exactly the wrapper they've
+  # configured for their other GUI apps (e.g. the mesa + vulkan
+  # nixGLCombinedWrapper), which is what actually works on their hardware. If
+  # they don't run that module but do set targets.genericLinux.enable, fall back
+  # to the nixGL flake input bundled here (nixGLIntel = Mesa GL, covers AMD
+  # radeonsi/RADV despite the name; nixVulkanIntel = Mesa Vulkan ICD). On NixOS
+  # neither applies — /run/opengl-driver is already present.
   nixGLPkgs = nixgl.packages.${pkgs.stdenv.hostPlatform.system};
-  useNixGL = config.targets.genericLinux.enable;
-  nixGLPrefix = optionalString useNixGL
+  libNixGL = config.lib.nixGL or null;
+  bundledNixGLPrefix =
     "${nixGLPkgs.nixGLIntel}/bin/nixGLIntel ${nixGLPkgs.nixVulkanIntel}/bin/nixVulkanIntel ";
 
-  wineLauncher = common.mkWineLauncher { inherit nixGLPrefix; };
+  wineLauncher =
+    if libNixGL != null && libNixGL ? wrap then
+      libNixGL.wrap (common.mkWineLauncher { })
+    else if config.targets.genericLinux.enable then
+      common.mkWineLauncher { nixGLPrefix = bundledNixGLPrefix; }
+    else
+      common.mkWineLauncher { };
 
   # winema3-wrap is only meaningful here when it has something to do — i.e. when
   # keepAwake scopes the inhibit service + power settings to a launch. Unlike the
