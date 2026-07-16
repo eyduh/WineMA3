@@ -229,6 +229,61 @@ capabilities (those require root).
 }
 ```
 
+### Wiring the input into standalone Home Manager
+
+The `imports` line above assumes the `winema3` flake is in scope where you write
+it. With **standalone** Home Manager (a `homeConfigurations` flake), the module
+lives in a `homeManagerConfiguration` call, and there are two ways to get the
+flake to it. Pick one — mixing them up causes an `infinite recursion` error.
+
+**Simplest — import directly in the flake's `modules` list** (the input is
+already in scope there):
+
+```nix
+# flake.nix
+homeConfigurations."<host>" = home-manager.lib.homeManagerConfiguration {
+  inherit pkgs;
+  modules = [
+    winema3.homeModules.default
+    ./winema3.nix               # your per-host settings file (no import needed)
+  ];
+};
+```
+```nix
+# winema3.nix — pure settings, no winema3 arg, no import:
+{ ... }:
+{
+  programs.winema3 = { enable = true; launchMode = "on-demand"; keepAwake = false; };
+}
+```
+
+**Or — keep the import in a separate file** that takes the flake as an arg. That
+arg **must** be passed via `extraSpecialArgs`, not left to `_module.args`:
+
+```nix
+# flake.nix
+homeConfigurations."<host>" = home-manager.lib.homeManagerConfiguration {
+  inherit pkgs;
+  extraSpecialArgs = { inherit winema3; };   # required — see note below
+  modules = [ ./winema3.nix ];
+};
+```
+```nix
+# winema3.nix
+{ winema3, ... }:
+{
+  imports = [ winema3.homeModules.default ];
+  programs.winema3 = { enable = true; launchMode = "on-demand"; keepAwake = false; };
+}
+```
+
+> **Why `extraSpecialArgs`?** `imports` is resolved *before* `config` exists.
+> `specialArgs` are available at that stage; ordinary module args
+> (`_module.args`) are not — resolving one requires `config`, so referencing such
+> an arg inside `imports` creates a cycle and Home Manager aborts with
+> `infinite recursion encountered … you probably reference 'config' in
+> 'imports'`. Passing the flake through `extraSpecialArgs` avoids that.
+
 What the Home Manager module reproduces vs. the NixOS module:
 
 | Functionality | Home Manager | NixOS |
