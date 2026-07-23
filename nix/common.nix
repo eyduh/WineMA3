@@ -4,7 +4,7 @@
 { pkgs, lib }:
 
 let
-  inherit (lib) optionalString;
+  inherit (lib) optionalString optionals;
 in
 rec {
   # Applies "no power saving" settings across GNOME, XFCE, KDE, and X11 so a
