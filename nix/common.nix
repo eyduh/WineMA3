@@ -99,9 +99,26 @@ rec {
   # "Application needs opengl >= 4.3"; routing wine through nixGL (GL + Vulkan
   # for DXVK) injects the host drivers. Empty on NixOS, where /run/opengl-driver
   # already provides them.
-  mkWineLauncher = { nixGLPrefix ? "" }: pkgs.writeShellScriptBin "gma3-wine" ''
+  mkWineLauncher = { nixGLPrefix ? "", wayland ? false }:
+    let
+      winePackage = if wayland then pkgs.wineWow64Packages.wayland else pkgs.wineWow64Packages.full;
+      binName     = if wayland then "gma3-wine-wayland" else "gma3-wine";
+    in
+    pkgs.writeShellScriptBin binName ''
     set -u
-    export DISPLAY="''${DISPLAY:-:0}"
+    ${if wayland then ''
+      # Native Wayland mode: do not set DISPLAY so Wine selects the Wayland
+      # driver. Fall back to wayland-0 if the compositor hasn't set the var.
+      unset DISPLAY
+      export WAYLAND_DISPLAY="''${WAYLAND_DISPLAY:-wayland-0}"
+      # Prefer the capability-wrapped wineserver (cap_net_raw for MA-Net) when
+      # available (NixOS security.wrappers); harmless no-op elsewhere.
+      if [ -x /run/wrappers/bin/wineserver ]; then
+        export WINESERVER=/run/wrappers/bin/wineserver
+      fi
+    '' else ''
+      export DISPLAY="''${DISPLAY:-:0}"
+    ''}
     export XDG_RUNTIME_DIR="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
     export DBUS_SESSION_BUS_ADDRESS="''${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
 
@@ -133,27 +150,30 @@ rec {
     # then block on `wineserver -w`, which waits until every wine process in the
     # prefix has exited. That keeps this launcher — hence the scope's main PID —
     # alive for the whole session without needing a terminal.
-    ${nixGLPrefix}${pkgs.wineWow64Packages.full}/bin/wine "''${WINEMA3_APP:-app_system.exe}" HOSTTYPE=onPC "$@" || true
-    exec ${pkgs.wineWow64Packages.full}/bin/wineserver -w
+    ${nixGLPrefix}${winePackage}/bin/wine "''${WINEMA3_APP:-app_system.exe}" HOSTTYPE=onPC "$@" || true
+    exec ${winePackage}/bin/wineserver -w
   '';
 
   # The "grandMA3 (Wine)" menu entry. Pass wrap = true to run the launcher
   # through winema3-wrap (on-demand mode) so launching from the menu brings the
   # per-session services up and down around the run.
-  mkWineDesktop = { wrap ? false }: pkgs.makeDesktopItem {
-    name = "grandMA3-wine";
-    desktopName = "grandMA3 (Wine)";
+  mkWineDesktop = { wrap ? false, wayland ? false }: pkgs.makeDesktopItem {
+    name        = if wayland then "grandMA3-wine-wayland" else "grandMA3-wine";
+    desktopName = if wayland then "grandMA3 (Wine/Wayland)" else "grandMA3 (Wine)";
     genericName = "Lighting Console";
-    comment = "grandMA3 onPC via Wine (WineMA3)";
+    comment     = if wayland then "grandMA3 onPC via Wine with native Wayland driver"
+                             else "grandMA3 onPC via Wine (WineMA3)";
     # Reference the binaries by name (they're on the session PATH via the
     # package set) rather than by absolute store path — this keeps the entry
     # valid across rebuilds and avoids stranding on a garbage-collected path.
     # In on-demand mode wrap through winema3-wrap so launching from the menu
     # opens the MA-Net firewall ports (and starts inhibit) for the session and
     # closes them again on exit. Without this the console can't reach the PC.
-    exec = (optionalString wrap "winema3-wrap ") + "gma3-wine";
+    exec = (optionalString wrap "winema3-wrap ")
+         + (if wayland then "gma3-wine-wayland" else "gma3-wine");
     categories = [ "AudioVideo" ];
-    keywords = [ "grandMA3" "MA3" "lighting" "onPC" "wine" ];
+    keywords = [ "grandMA3" "MA3" "lighting" "onPC" "wine" ]
+             ++ optionals wayland [ "wayland" ];
     startupWMClass = "app_system.exe";
     # Run in a terminal: launching from a Terminal=false .desktop lands the
     # process in a transient KDE app scope whose control-group teardown reaps

@@ -12,7 +12,8 @@ let
   inherit (common) noPowerSaveScript autostartDesktop;
 
   # NixOS has /run/opengl-driver, so no nixGL wrapping is needed.
-  wineLauncher = common.mkWineLauncher { };
+  wineLauncher        = common.mkWineLauncher { };
+  wineWaylandLauncher = common.mkWineLauncher { wayland = true; };
 
   # Placed in PATH when launchMode = "on-demand". The shipped "grandMA3 (Wine)"
   # .desktop entry runs its launcher through this wrapper automatically:
@@ -43,7 +44,8 @@ let
     "$@"
   '';
 
-  wineDesktop = common.mkWineDesktop { wrap = onDemand; };
+  wineDesktop        = common.mkWineDesktop { wrap = onDemand; };
+  wineWaylandDesktop = common.mkWineDesktop { wrap = onDemand; wayland = true; };
 in
 {
   options.programs.winema3 = {
@@ -110,7 +112,8 @@ in
 
   config = mkIf cfg.enable {
 
-    environment.systemPackages = [ cfg.package wineLauncher wineDesktop ]
+    environment.systemPackages =
+      [ cfg.package wineLauncher wineDesktop wineWaylandLauncher wineWaylandDesktop ]
       ++ optional onDemand launchWrapperBin;
 
     # Tell the runtime installer the module owns the launcher/desktop entry, so
