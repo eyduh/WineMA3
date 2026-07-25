@@ -98,6 +98,7 @@ BOOL WINAPI NtUserGetTouchInputInfo( HTOUCHINPUT handle, UINT count, TOUCHINPUT 
     }
     n = count < touch_slots[idx].count ? count : touch_slots[idx].count;
     memcpy( ptr, touch_slots[idx].inputs, n * sizeof(TOUCHINPUT) );
+    InterlockedExchange( &touch_slots[idx].in_use, 0 );
     return TRUE;
 }
 
@@ -115,11 +116,7 @@ BOOL WINAPI NtUserCloseTouchInputHandle( HTOUCHINPUT handle )
         return FALSE;
     }
     idx = (int)v - 1;
-    if (!InterlockedCompareExchange( &touch_slots[idx].in_use, 0, 1 ))
-    {
-        RtlSetLastWin32Error( ERROR_INVALID_HANDLE );
-        return FALSE;
-    }
+    InterlockedExchange( &touch_slots[idx].in_use, 0 );
     return TRUE;
 }
 
