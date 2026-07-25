@@ -87,6 +87,7 @@
         # grandMA3 onPC receive touch events instead of ignoring them.
         wineWow64Packages = prev.wineWow64Packages // {
           full = prev.wineWow64Packages.full.overrideAttrs (old: {
+            nativeBuildInputs = (old.nativeBuildInputs or []) ++ [ final.python3 ];
             postPatch = (old.postPatch or "") + ''
               python3 ${./nix/wine-wm-touch.py}
             '';
