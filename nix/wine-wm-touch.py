@@ -99,6 +99,7 @@ BOOL WINAPI NtUserGetTouchInputInfo( HTOUCHINPUT handle, UINT count, TOUCHINPUT 
         RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return FALSE;
     }
+    FIXME( "WM_TOUCH: GetTouchInputInfo called handle=%p slot=%d\\n", handle, idx );
     n = count < touch_slots[idx].count ? count : touch_slots[idx].count;
     memcpy( ptr, touch_slots[idx].inputs, n * sizeof(TOUCHINPUT) );
     InterlockedExchange( &touch_slots[idx].in_use, 0 );
@@ -150,33 +151,51 @@ OLD_SEND_BODY = """\
     if (input->type == INPUT_MOUSE && (input->mi.dwFlags & (MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_RIGHTDOWN)))"""
 
 NEW_SEND_BODY = """\
-    /* WM_TOUCH sentinel: winex11.drv sends INPUT_HARDWARE with hi.uMsg=WM_TOUCH,
-     * hi.wParamL=touch_id, hi.wParamH=TOUCHEVENTF_* flags,
-     * lparam=MAKELPARAM(norm_x, norm_y) where coords are 0-65535 normalised.
-     * Allocate a touch slot, post WM_TOUCH to the window, and return without
-     * going through the server (which doesn't know about HTOUCHINPUT handles). */
+    /* WM_TOUCH sentinel: winex11.drv sends INPUT_HARDWARE with hi.uMsg=WM_TOUCH.
+     * Two modes:
+     *   Single-point (wParamH != 0xFFFF): wParamL=touch_id, wParamH=TOUCHEVENTF_*,
+     *     lparam=MAKELPARAM(norm_x,norm_y) 0-65535 screen coords.
+     *   Multi-point  (wParamH == 0xFFFF): wParamL=count,
+     *     lparam=(ULONG_PTR) pointer to caller-stack TOUCHINPUT[count] (safe: call
+     *     is synchronous and alloc_touch_slot memcpy's before returning).
+     * Post to GA_ROOT so DXVK child windows don't swallow the message. */
     if (input->type == INPUT_HARDWARE && input->hi.uMsg == WM_TOUCH)
     {
-        RECT virtual = NtUserGetVirtualScreenRect( 2 /* MDT_RAW_DPI */ );
-        UINT norm_x  = LOWORD( lparam ), norm_y = HIWORD( lparam );
-        LONG screen_w = virtual.right  - virtual.left;
-        LONG screen_h = virtual.bottom - virtual.top;
-        TOUCHINPUT ti = { 0 };
+        HWND root = NtUserGetAncestor( hwnd, GA_ROOT );
         HTOUCHINPUT htouchinput;
+        if (!root) root = hwnd;
 
-        ti.x         = screen_w ? (LONG)((ULONGLONG)norm_x * screen_w * 100 / 65535) : 0;
-        ti.y         = screen_h ? (LONG)((ULONGLONG)norm_y * screen_h * 100 / 65535) : 0;
-        ti.hSource   = NULL;
-        ti.dwID      = input->hi.wParamL;  /* XI2 touch point ID */
-        ti.dwFlags   = input->hi.wParamH;  /* TOUCHEVENTF_* */
-        ti.dwMask    = TOUCHINPUTMASKF_CONTACTAREA;
-        ti.dwTime    = 0;
-        ti.cxContact = 100;
-        ti.cyContact = 100;
+        if (input->hi.wParamH == 0xFFFF) /* multi-point */
+        {
+            const TOUCHINPUT *inputs = (const TOUCHINPUT *)(ULONG_PTR)lparam;
+            UINT count = input->hi.wParamL;
+            if ((htouchinput = alloc_touch_slot( count, inputs )))
+                NtUserPostMessage( root, WM_TOUCH, MAKEWPARAM( count, 0 ), (LPARAM)htouchinput );
+            return STATUS_SUCCESS;
+        }
 
-        if ((htouchinput = alloc_touch_slot( 1, &ti )))
-            NtUserPostMessage( hwnd, WM_TOUCH, MAKEWPARAM( 1, 0 ), (LPARAM)htouchinput );
-        return STATUS_SUCCESS;
+        /* Single-point mode */
+        {
+            RECT virtual = NtUserGetVirtualScreenRect( 2 /* MDT_RAW_DPI */ );
+            UINT norm_x  = LOWORD( lparam ), norm_y = HIWORD( lparam );
+            LONG screen_w = virtual.right  - virtual.left;
+            LONG screen_h = virtual.bottom - virtual.top;
+            TOUCHINPUT ti = { 0 };
+
+            ti.x         = screen_w ? (LONG)((ULONGLONG)norm_x * screen_w * 100 / 65535) : 0;
+            ti.y         = screen_h ? (LONG)((ULONGLONG)norm_y * screen_h * 100 / 65535) : 0;
+            ti.hSource   = NULL;
+            ti.dwID      = input->hi.wParamL;
+            ti.dwFlags   = input->hi.wParamH;
+            ti.dwMask    = TOUCHINPUTMASKF_CONTACTAREA;
+            ti.dwTime    = 0;
+            ti.cxContact = 100;
+            ti.cyContact = 100;
+
+            if ((htouchinput = alloc_touch_slot( 1, &ti )))
+                NtUserPostMessage( root, WM_TOUCH, MAKEWPARAM( 1, 0 ), (LPARAM)htouchinput );
+            return STATUS_SUCCESS;
+        }
     }
 
     info.type     = MSG_HARDWARE;
@@ -519,6 +538,12 @@ static BOOL X11DRV_TouchEvent( HWND hwnd, XGenericEventCookie *xev )
 }"""
 
 NEW_TOUCH_EVENT = """\
+/* --- WineMA3: active XI2 touch point tracker for multi-finger WM_TOUCH --- */
+#define XI2_MAX_TOUCH 10
+struct xi2_touch_point { int id; LONG screen_x; LONG screen_y; DWORD flags; };
+static struct xi2_touch_point xi2_active[XI2_MAX_TOUCH];
+static int xi2_count;
+
 static BOOL X11DRV_TouchEvent( HWND hwnd, XGenericEventCookie *xev )
 {
     RECT virtual = NtUserGetVirtualScreenRect( MDT_RAW_DPI );
@@ -526,7 +551,9 @@ static BOOL X11DRV_TouchEvent( HWND hwnd, XGenericEventCookie *xev )
     INPUT touch_hw = {.type = INPUT_HARDWARE};
     XIDeviceEvent *event = xev->data;
     int flags = 0;
-    WORD touch_flags = 0;
+    DWORD touch_flags = 0;
+    int ti_idx = -1;
+    int i;
     POINT pos;
 
     input.mi.dx = event->event_x;
@@ -540,40 +567,92 @@ static BOOL X11DRV_TouchEvent( HWND hwnd, XGenericEventCookie *xev )
     case XI_TouchBegin:
         input.hi.uMsg = WM_POINTERDOWN;
         flags |= POINTER_MESSAGE_FLAG_NEW;
-        touch_flags = TOUCHEVENTF_DOWN | TOUCHEVENTF_INRANGE | TOUCHEVENTF_PRIMARY;
-        TRACE("XI_TouchBegin detail %u pos %dx%d, flags %#x\\n", event->detail, pos.x, pos.y, flags);
+        touch_flags = TOUCHEVENTF_DOWN | TOUCHEVENTF_INRANGE;
+        TRACE("XI_TouchBegin detail %u pos %dx%d count %d\\n", event->detail, pos.x, pos.y, xi2_count + 1);
+        if (xi2_count < XI2_MAX_TOUCH)
+        {
+            ti_idx = xi2_count++;
+            xi2_active[ti_idx].id       = event->detail;
+            xi2_active[ti_idx].screen_x = (LONG)input.mi.dx;
+            xi2_active[ti_idx].screen_y = (LONG)input.mi.dy;
+            xi2_active[ti_idx].flags    = touch_flags;
+        }
         break;
     case XI_TouchEnd:
         input.hi.uMsg = WM_POINTERUP;
-        touch_flags = TOUCHEVENTF_UP | TOUCHEVENTF_PRIMARY;
-        TRACE("XI_TouchEnd detail %u pos %dx%d, flags %#x\\n", event->detail, pos.x, pos.y, flags);
+        touch_flags = TOUCHEVENTF_UP;
+        TRACE("XI_TouchEnd detail %u pos %dx%d count %d\\n", event->detail, pos.x, pos.y, xi2_count);
+        for (i = 0; i < xi2_count; i++)
+            if (xi2_active[i].id == event->detail)
+            {
+                ti_idx = i;
+                xi2_active[i].screen_x = (LONG)input.mi.dx;
+                xi2_active[i].screen_y = (LONG)input.mi.dy;
+                xi2_active[i].flags    = touch_flags;
+            }
         break;
     case XI_TouchUpdate:
         input.hi.uMsg = WM_POINTERUPDATE;
-        touch_flags = TOUCHEVENTF_MOVE | TOUCHEVENTF_INRANGE | TOUCHEVENTF_PRIMARY;
-        TRACE("XI_TouchUpdate detail %u pos %dx%d, flags %#x\\n", event->detail, pos.x, pos.y, flags);
+        touch_flags = TOUCHEVENTF_MOVE | TOUCHEVENTF_INRANGE;
+        TRACE("XI_TouchUpdate detail %u pos %dx%d count %d\\n", event->detail, pos.x, pos.y, xi2_count);
+        for (i = 0; i < xi2_count; i++)
+            if (xi2_active[i].id == event->detail)
+            {
+                ti_idx = i;
+                xi2_active[i].screen_x = (LONG)input.mi.dx;
+                xi2_active[i].screen_y = (LONG)input.mi.dy;
+                xi2_active[i].flags    = touch_flags;
+            }
         break;
     }
 
-    /* WM_POINTER* dispatch (existing path) */
+    /* Slot 0 is always PRIMARY; clear from others */
+    if (xi2_count > 0) xi2_active[0].flags |= TOUCHEVENTF_PRIMARY;
+    for (i = 1; i < xi2_count; i++) xi2_active[i].flags &= ~TOUCHEVENTF_PRIMARY;
+
+    /* WM_POINTER* dispatch (existing path, keeps cursor tracking) */
     input.hi.wParamL = event->detail;
     input.hi.wParamH = POINTER_MESSAGE_FLAG_INRANGE | POINTER_MESSAGE_FLAG_INCONTACT | flags;
     NtUserSendHardwareInput( hwnd, 0, &input, MAKELPARAM( pos.x, pos.y ) );
 
-    /* WM_TOUCH synthesis for apps using RegisterTouchWindow (e.g. grandMA3 onPC).
-     * WM_TOUCH as hi.uMsg acts as a sentinel: send_hardware_message intercepts it,
-     * allocates a TOUCHINPUT slot, and posts WM_TOUCH to the window. */
-    if (touch_flags)
+    /* WM_TOUCH synthesis.  Single-point (xi2_count==1): pack coords in lparam.
+     * Multi-point (xi2_count>1): pass stack TOUCHINPUT[] via lparam pointer,
+     * wParamH=0xFFFF sentinel so send_hardware_message takes the multi path.
+     * send_hardware_message copies to a static slot before returning, so the
+     * stack array is valid for the entire synchronous call. */
+    if (xi2_count > 0)
     {
-        touch_hw.hi.uMsg    = WM_TOUCH;
-        touch_hw.hi.wParamL = (WORD)event->detail;  /* XI2 touch point ID */
-        touch_hw.hi.wParamH = touch_flags;           /* TOUCHEVENTF_* */
-        NtUserSendHardwareInput( hwnd, 0, &touch_hw, MAKELPARAM( (WORD)pos.x, (WORD)pos.y ) );
+        if (xi2_count == 1)
+        {
+            touch_hw.hi.uMsg    = WM_TOUCH;
+            touch_hw.hi.wParamL = (WORD)event->detail;
+            touch_hw.hi.wParamH = (WORD)xi2_active[0].flags;
+            NtUserSendHardwareInput( hwnd, 0, &touch_hw, MAKELPARAM( (WORD)pos.x, (WORD)pos.y ) );
+        }
+        else
+        {
+            TOUCHINPUT multi[XI2_MAX_TOUCH];
+            for (i = 0; i < xi2_count; i++)
+            {
+                multi[i].x           = xi2_active[i].screen_x * 100;
+                multi[i].y           = xi2_active[i].screen_y * 100;
+                multi[i].hSource     = NULL;
+                multi[i].dwID        = (DWORD)xi2_active[i].id;
+                multi[i].dwFlags     = xi2_active[i].flags;
+                multi[i].dwMask      = TOUCHINPUTMASKF_CONTACTAREA;
+                multi[i].dwTime      = 0;
+                multi[i].dwExtraInfo = 0;
+                multi[i].cxContact   = 100;
+                multi[i].cyContact   = 100;
+            }
+            touch_hw.hi.uMsg    = WM_TOUCH;
+            touch_hw.hi.wParamL = (WORD)xi2_count;
+            touch_hw.hi.wParamH = 0xFFFF;
+            NtUserSendHardwareInput( hwnd, 0, &touch_hw, (LPARAM)multi );
+        }
     }
 
-    /* Mouse compat synthesis: Windows auto-converts touch→WM_LBUTTONDOWN for
-     * apps that haven't opted into WM_POINTER; Wine's WM_POINTER path only
-     * generates WM_MOUSEMOVE (hover), not button presses. */
+    /* Mouse compat: synthesize WM_LBUTTONDOWN/UP for apps that use mouse events */
     if (event->evtype == XI_TouchBegin || event->evtype == XI_TouchEnd)
     {
         INPUT mouse_hw = {.type = INPUT_MOUSE};
@@ -582,6 +661,14 @@ static BOOL X11DRV_TouchEvent( HWND hwnd, XGenericEventCookie *xev )
         mouse_hw.mi.dx = (LONG)pos.x;
         mouse_hw.mi.dy = (LONG)pos.y;
         NtUserSendHardwareInput( hwnd, 0, &mouse_hw, 0 );
+    }
+
+    /* Remove lifting point from tracker after sending WM_TOUCH */
+    if (event->evtype == XI_TouchEnd && ti_idx >= 0)
+    {
+        xi2_count--;
+        memmove( &xi2_active[ti_idx], &xi2_active[ti_idx + 1],
+                 (xi2_count - ti_idx) * sizeof(xi2_active[0]) );
     }
 
     return TRUE;
