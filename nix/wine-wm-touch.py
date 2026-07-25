@@ -2,12 +2,15 @@
 """
 Apply WM_TOUCH synthesis to Wine 11.0 source tree (run from the Wine source root).
 
-Modifies 5 files to implement RegisterTouchWindow / WM_TOUCH dispatch:
+Modifies 7 files to implement RegisterTouchWindow / WM_TOUCH dispatch:
   dlls/win32u/message.c     — touch slot table + alloc + NtUser{Get,Close}TouchInput*
                                + WM_TOUCH sentinel intercept in send_hardware_message
   dlls/win32u/win32u.spec   — export the two new NtUser functions
+  dlls/win32u/win32syscalls.h — fix SYSCALL_ENTRY for the two new functions
+  dlls/wow64win/user.c      — WoW64 thunks for the two new functions
   include/ntuser.h          — declare the two new NtUser functions
   dlls/user32/input.c       — wire stubs to new NtUser calls
+  dlls/user32/sysparams.c   — advertise SM_DIGITIZER + SM_MAXIMUMTOUCHES
   dlls/winex11.drv/mouse.c  — dispatch WM_TOUCH from X11DRV_TouchEvent
 """
 
@@ -433,7 +436,47 @@ patch(
 )
 
 # ---------------------------------------------------------------------------
-# 5. dlls/winex11.drv/mouse.c — synthesise WM_TOUCH from X11DRV_TouchEvent
+# 6. dlls/user32/sysparams.c — advertise touch digitizer capability
+#
+# Wine returns 0 for SM_DIGITIZER (94) and SM_MAXIMUMTOUCHES (95), which
+# tells apps like grandMA3 onPC there is no touchscreen and causes them to
+# silently ignore WM_TOUCH messages even when they arrive.
+# Return values matching a standard 10-point integrated touchscreen.
+# ---------------------------------------------------------------------------
+
+patch(
+    "dlls/user32/sysparams.c",
+    "INT WINAPI GetSystemMetrics( INT index )\n"
+    "{\n"
+    "    return NtUserGetSystemMetrics( index );\n"
+    "}",
+    "INT WINAPI GetSystemMetrics( INT index )\n"
+    "{\n"
+    "    /* Advertise integrated touch digitizer (WineMA3 patch) */\n"
+    "    if (index == 94 /* SM_DIGITIZER */) return 0xC1; /* NID_INTEGRATED_TOUCH|NID_MULTI_INPUT|NID_READY */\n"
+    "    if (index == 95 /* SM_MAXIMUMTOUCHES */) return 10;\n"
+    "    return NtUserGetSystemMetrics( index );\n"
+    "}",
+    "advertise SM_DIGITIZER + SM_MAXIMUMTOUCHES in GetSystemMetrics",
+)
+
+patch(
+    "dlls/user32/sysparams.c",
+    "INT WINAPI GetSystemMetricsForDpi( INT index, UINT dpi )\n"
+    "{\n"
+    "    return NtUserGetSystemMetricsForDpi( index, dpi );\n"
+    "}",
+    "INT WINAPI GetSystemMetricsForDpi( INT index, UINT dpi )\n"
+    "{\n"
+    "    if (index == 94 /* SM_DIGITIZER */) return 0xC1;\n"
+    "    if (index == 95 /* SM_MAXIMUMTOUCHES */) return 10;\n"
+    "    return NtUserGetSystemMetricsForDpi( index, dpi );\n"
+    "}",
+    "advertise SM_DIGITIZER + SM_MAXIMUMTOUCHES in GetSystemMetricsForDpi",
+)
+
+# ---------------------------------------------------------------------------
+# 7. dlls/winex11.drv/mouse.c — synthesise WM_TOUCH from X11DRV_TouchEvent
 # ---------------------------------------------------------------------------
 
 OLD_TOUCH_EVENT = """\
