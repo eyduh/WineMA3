@@ -192,16 +192,29 @@ patch("dlls/win32u/message.c", OLD_SEND_BODY, NEW_SEND_BODY,
       "add WM_TOUCH intercept in send_hardware_message")
 
 # ---------------------------------------------------------------------------
-# 2. dlls/win32u/win32u.spec — add exports after NtUserPostMessage
+# 2. dlls/win32u/win32u.spec — add/update touch exports
+#
+# NtUserGetTouchInputInfo already exists as "@ stub -syscall" — replace it
+# with a real implementation entry (no -syscall: user32 calls via import lib).
+# NtUserCloseTouchInputHandle is absent — insert it alphabetically between
+# NtUserCloseDesktop and NtUserCloseWindowStation.
 # ---------------------------------------------------------------------------
 
 patch(
     "dlls/win32u/win32u.spec",
-    "@ stdcall -syscall NtUserPostMessage(long long long long)",
-    "@ stdcall -syscall NtUserPostMessage(long long long long)\n"
-    "@ stdcall NtUserCloseTouchInputHandle(long)\n"
-    "@ stdcall NtUserGetTouchInputInfo(long long ptr long)",
-    "add NtUserClose/GetTouchInput* exports",
+    "@ stub -syscall NtUserGetTouchInputInfo",
+    "@ stdcall -syscall NtUserGetTouchInputInfo(long long ptr long)",
+    "replace NtUserGetTouchInputInfo stub with real entry",
+)
+
+patch(
+    "dlls/win32u/win32u.spec",
+    "@ stdcall -syscall NtUserCloseDesktop(long)\n"
+    "@ stdcall -syscall NtUserCloseWindowStation(long)",
+    "@ stdcall -syscall NtUserCloseDesktop(long)\n"
+    "@ stdcall -syscall NtUserCloseTouchInputHandle(long)\n"
+    "@ stdcall -syscall NtUserCloseWindowStation(long)",
+    "add NtUserCloseTouchInputHandle between CloseDesktop and CloseWindowStation",
 )
 
 # ---------------------------------------------------------------------------
