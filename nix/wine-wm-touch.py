@@ -571,6 +571,19 @@ static BOOL X11DRV_TouchEvent( HWND hwnd, XGenericEventCookie *xev )
         NtUserSendHardwareInput( hwnd, 0, &touch_hw, MAKELPARAM( (WORD)pos.x, (WORD)pos.y ) );
     }
 
+    /* Mouse compat synthesis: Windows auto-converts touch→WM_LBUTTONDOWN for
+     * apps that haven't opted into WM_POINTER; Wine's WM_POINTER path only
+     * generates WM_MOUSEMOVE (hover), not button presses. */
+    if (event->evtype == XI_TouchBegin || event->evtype == XI_TouchEnd)
+    {
+        INPUT mouse_hw = {.type = INPUT_MOUSE};
+        mouse_hw.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK |
+                              (event->evtype == XI_TouchBegin ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP);
+        mouse_hw.mi.dx = (LONG)pos.x;
+        mouse_hw.mi.dy = (LONG)pos.y;
+        NtUserSendHardwareInput( hwnd, 0, &mouse_hw, 0 );
+    }
+
     return TRUE;
 }"""
 
