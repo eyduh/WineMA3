@@ -218,7 +218,83 @@ patch(
 )
 
 # ---------------------------------------------------------------------------
-# 3. include/ntuser.h — declare the two new NtUser functions
+# 3. dlls/win32u/win32syscalls.h — fix SYSCALL_STUB / SYSCALL_ENTRY
+#
+# NtUserGetTouchInputInfo was a stub in the original table with arg size 0.
+# We replace it with a real implementation so:
+#   a) remove it from ALL_SYSCALL_STUBS (else conflicting stub body generated)
+#   b) fix arg sizes: 16 bytes (4 args × 4B on 32-bit), 32 bytes (4 args × 8B on 64-bit)
+#
+# NtUserCloseTouchInputHandle is new — append it after the last entry in
+# ALL_SYSCALLS32 and ALL_SYSCALLS (64-bit) with a fresh ordinal 0x1604.
+# ---------------------------------------------------------------------------
+
+# 3a — remove SYSCALL_STUB for NtUserGetTouchInputInfo
+patch(
+    "dlls/win32u/win32syscalls.h",
+    "    SYSCALL_STUB( NtUserGetTopLevelWindow ) \\\n"
+    "    SYSCALL_STUB( NtUserGetTouchInputInfo ) \\\n"
+    "    SYSCALL_STUB( NtUserGetTouchValidationStatus ) \\",
+    "    SYSCALL_STUB( NtUserGetTopLevelWindow ) \\\n"
+    "    SYSCALL_STUB( NtUserGetTouchValidationStatus ) \\",
+    "remove SYSCALL_STUB for NtUserGetTouchInputInfo",
+)
+
+# 3b — fix arg size in ALL_SYSCALLS32 (4 bytes per arg → 4 args = 16 bytes)
+patch(
+    "dlls/win32u/win32syscalls.h",
+    "    SYSCALL_ENTRY( 0x144f, NtUserGetTitleBarInfo, 8 ) \\\n"
+    "    SYSCALL_ENTRY( 0x1450, NtUserGetTopLevelWindow, 0 ) \\\n"
+    "    SYSCALL_ENTRY( 0x1451, NtUserGetTouchInputInfo, 0 ) \\\n"
+    "    SYSCALL_ENTRY( 0x1452, NtUserGetTouchValidationStatus, 0 ) \\",
+    "    SYSCALL_ENTRY( 0x144f, NtUserGetTitleBarInfo, 8 ) \\\n"
+    "    SYSCALL_ENTRY( 0x1450, NtUserGetTopLevelWindow, 0 ) \\\n"
+    "    SYSCALL_ENTRY( 0x1451, NtUserGetTouchInputInfo, 16 ) \\\n"
+    "    SYSCALL_ENTRY( 0x1452, NtUserGetTouchValidationStatus, 0 ) \\",
+    "fix NtUserGetTouchInputInfo arg size in ALL_SYSCALLS32 (0→16)",
+)
+
+# 3c — fix arg size in ALL_SYSCALLS (64-bit, 8 bytes per arg → 4 args = 32 bytes)
+patch(
+    "dlls/win32u/win32syscalls.h",
+    "    SYSCALL_ENTRY( 0x144f, NtUserGetTitleBarInfo, 16 ) \\\n"
+    "    SYSCALL_ENTRY( 0x1450, NtUserGetTopLevelWindow, 0 ) \\\n"
+    "    SYSCALL_ENTRY( 0x1451, NtUserGetTouchInputInfo, 0 ) \\\n"
+    "    SYSCALL_ENTRY( 0x1452, NtUserGetTouchValidationStatus, 0 ) \\",
+    "    SYSCALL_ENTRY( 0x144f, NtUserGetTitleBarInfo, 16 ) \\\n"
+    "    SYSCALL_ENTRY( 0x1450, NtUserGetTopLevelWindow, 0 ) \\\n"
+    "    SYSCALL_ENTRY( 0x1451, NtUserGetTouchInputInfo, 32 ) \\\n"
+    "    SYSCALL_ENTRY( 0x1452, NtUserGetTouchValidationStatus, 0 ) \\",
+    "fix NtUserGetTouchInputInfo arg size in ALL_SYSCALLS64 (0→32)",
+)
+
+# 3d — append NtUserCloseTouchInputHandle to ALL_SYSCALLS32 (4B per arg → 1 arg = 4 bytes)
+patch(
+    "dlls/win32u/win32syscalls.h",
+    "    SYSCALL_ENTRY( 0x1603, NtVisualCaptureBits, 0 )\n"
+    "#ifdef _WIN64",
+    "    SYSCALL_ENTRY( 0x1603, NtVisualCaptureBits, 0 ) \\\n"
+    "    SYSCALL_ENTRY( 0x1604, NtUserCloseTouchInputHandle, 4 )\n"
+    "#ifdef _WIN64",
+    "append NtUserCloseTouchInputHandle to ALL_SYSCALLS32",
+)
+
+# 3e — append NtUserCloseTouchInputHandle to ALL_SYSCALLS (64-bit, 8B per arg → 8 bytes)
+patch(
+    "dlls/win32u/win32syscalls.h",
+    "    SYSCALL_ENTRY( 0x1603, NtVisualCaptureBits, 0 )\n"
+    "#else\n"
+    "#define ALL_SYSCALLS ALL_SYSCALLS32",
+    "    SYSCALL_ENTRY( 0x1603, NtVisualCaptureBits, 0 ) \\\n"
+    "    SYSCALL_ENTRY( 0x1604, NtUserCloseTouchInputHandle, 8 )\n"
+    "#else\n"
+    "#define ALL_SYSCALLS ALL_SYSCALLS32",
+    "append NtUserCloseTouchInputHandle to ALL_SYSCALLS64",
+)
+
+# ---------------------------------------------------------------------------
+# 4. include/ntuser.h — declare the two new NtUser functions
+# (user32/input.c reaches ntuser.h via user_private.h → ntuser.h)
 # ---------------------------------------------------------------------------
 
 patch(
