@@ -81,6 +81,17 @@
     // {
       overlays.default = final: prev: {
         winema3 = final.callPackage ./nix/package.nix { };
+
+        # Patched Wine with WM_TOUCH synthesis from XI2 touch events.
+        # Implements RegisterTouchWindow / GetTouchInputInfo so apps like
+        # grandMA3 onPC receive touch events instead of ignoring them.
+        wineWow64Packages = prev.wineWow64Packages // {
+          full = prev.wineWow64Packages.full.overrideAttrs (old: {
+            postPatch = (old.postPatch or "") + ''
+              python3 ${./nix/wine-wm-touch.py}
+            '';
+          });
+        };
       };
 
       nixosModules.default = import ./nix/nixos-module.nix;
