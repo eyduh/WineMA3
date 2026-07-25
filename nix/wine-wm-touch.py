@@ -293,7 +293,72 @@ patch(
 )
 
 # ---------------------------------------------------------------------------
-# 4. include/ntuser.h — declare the two new NtUser functions
+# 4. dlls/wow64win/user.c — add WoW64 thunks for the two new NtUser functions
+#
+# ALL_SYSCALLS32 in win32syscalls.h generates a dispatch table in
+# wow64win/syscall.c that references wow64_NtUserXxx for every SYSCALL_ENTRY.
+# For non-stub functions we must provide real thunks in wow64win/user.c.
+# ---------------------------------------------------------------------------
+
+patch(
+    "dlls/wow64win/user.c",
+    "NTSTATUS WINAPI wow64_NtUserCloseWindowStation( UINT *args )\n"
+    "{\n"
+    "    HWINSTA handle = get_handle( &args );\n"
+    "\n"
+    "    return NtUserCloseWindowStation( handle );\n"
+    "}\n",
+    "NTSTATUS WINAPI wow64_NtUserCloseWindowStation( UINT *args )\n"
+    "{\n"
+    "    HWINSTA handle = get_handle( &args );\n"
+    "\n"
+    "    return NtUserCloseWindowStation( handle );\n"
+    "}\n"
+    "\n"
+    "NTSTATUS WINAPI wow64_NtUserCloseTouchInputHandle( UINT *args )\n"
+    "{\n"
+    "    HTOUCHINPUT handle = get_handle( &args );\n"
+    "\n"
+    "    return NtUserCloseTouchInputHandle( handle );\n"
+    "}\n",
+    "add wow64_NtUserCloseTouchInputHandle thunk",
+)
+
+patch(
+    "dlls/wow64win/user.c",
+    "NTSTATUS WINAPI wow64_NtUserGetTitleBarInfo( UINT *args )\n"
+    "{\n"
+    "    HWND hwnd = get_handle( &args );\n"
+    "    TITLEBARINFO *info = get_ptr( &args );\n"
+    "\n"
+    "    return NtUserGetTitleBarInfo( hwnd, info );\n"
+    "}\n"
+    "\n"
+    "NTSTATUS WINAPI wow64_NtUserGetUpdateRect( UINT *args )",
+    "NTSTATUS WINAPI wow64_NtUserGetTitleBarInfo( UINT *args )\n"
+    "{\n"
+    "    HWND hwnd = get_handle( &args );\n"
+    "    TITLEBARINFO *info = get_ptr( &args );\n"
+    "\n"
+    "    return NtUserGetTitleBarInfo( hwnd, info );\n"
+    "}\n"
+    "\n"
+    "NTSTATUS WINAPI wow64_NtUserGetTouchInputInfo( UINT *args )\n"
+    "{\n"
+    "    HTOUCHINPUT handle = get_handle( &args );\n"
+    "    UINT count = get_ulong( &args );\n"
+    "    TOUCHINPUT *ptr = get_ptr( &args );\n"
+    "    int size = get_ulong( &args );\n"
+    "\n"
+    "    return NtUserGetTouchInputInfo( handle, count, ptr, size );\n"
+    "}\n"
+    "\n"
+    "NTSTATUS WINAPI wow64_NtUserGetUpdateRect( UINT *args )",
+    "add wow64_NtUserGetTouchInputInfo thunk",
+)
+
+# ---------------------------------------------------------------------------
+# 5. include/ntuser.h — declare the two new NtUser functions
 # (user32/input.c reaches ntuser.h via user_private.h → ntuser.h)
 # ---------------------------------------------------------------------------
 
