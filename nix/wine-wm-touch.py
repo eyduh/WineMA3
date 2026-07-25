@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Apply WM_TOUCH synthesis to Wine 11.x source tree (run from the Wine source root).
+Apply WM_TOUCH synthesis to Wine 11.0 source tree (run from the Wine source root).
 
 Modifies 5 files to implement RegisterTouchWindow / WM_TOUCH dispatch:
-  dlls/win32u/input.c       — touch slot table + NtUser{Get,Close}TouchInput*
+  dlls/win32u/message.c     — touch slot table + alloc + NtUser{Get,Close}TouchInput*
+                               + WM_TOUCH sentinel intercept in send_hardware_message
   dlls/win32u/win32u.spec   — export the two new NtUser functions
   include/ntuser.h          — declare the two new NtUser functions
   dlls/user32/input.c       — wire stubs to new NtUser calls
@@ -11,40 +12,41 @@ Modifies 5 files to implement RegisterTouchWindow / WM_TOUCH dispatch:
 """
 
 import sys
-import os
 
-def patch(path, old, new, label=""):
+def patch(path, old, new, label):
     with open(path, 'r') as f:
         content = f.read()
     if old not in content:
-        print(f"ERROR: anchor not found in {path} [{label or old[:60].strip()}]", file=sys.stderr)
+        print(f"ERROR: anchor not found in {path} [{label}]", file=sys.stderr)
         sys.exit(1)
     result = content.replace(old, new, 1)
     with open(path, 'w') as f:
         f.write(result)
-    print(f"  patched {path} [{label or old[:60].strip()}]")
+    print(f"  patched {path} [{label}]")
 
 # ---------------------------------------------------------------------------
-# 1a. dlls/win32u/input.c — insert touch slot table before send_hardware_input
+# 1. dlls/win32u/message.c
+#    a) Insert touch slot table + NtUser functions before send_hardware_message
+#    b) Add WM_TOUCH sentinel intercept at the top of send_hardware_message
 # ---------------------------------------------------------------------------
 
-TOUCH_SLOT_CODE = """\
+TOUCH_INFRA = """\
 /* =========================================================================
  * WM_TOUCH handle ring buffer (WineMA3 patch: grandMA3 onPC touch support)
  *
- * HTOUCHINPUT is encoded as (slot_index + 1), range 1..TOUCH_SLOT_COUNT.
- * Allocated by send_hardware_input when winex11.drv sends the WM_TOUCH
- * sentinel; released by NtUserCloseTouchInputHandle called from user32.
+ * HTOUCHINPUT is encoded as (slot_index + 1).  Allocated in
+ * send_hardware_message when winex11.drv fires the WM_TOUCH sentinel;
+ * released by NtUserCloseTouchInputHandle called from user32.
  * ========================================================================= */
 
-#define TOUCH_SLOT_COUNT 32
+#define TOUCH_SLOT_COUNT      32
 #define TOUCH_SLOT_MAX_POINTS 10
 
 struct touch_slot
 {
     TOUCHINPUT inputs[TOUCH_SLOT_MAX_POINTS];
     UINT        count;
-    LONG        in_use;  /* atomic: 0=free, 1=claimed */
+    LONG        in_use;  /* atomic: 0 = free, 1 = claimed */
 };
 
 static struct touch_slot touch_slots[TOUCH_SLOT_COUNT];
@@ -80,18 +82,18 @@ BOOL WINAPI NtUserGetTouchInputInfo( HTOUCHINPUT handle, UINT count, TOUCHINPUT 
 
     if (!v || v > TOUCH_SLOT_COUNT)
     {
-        SetLastError( ERROR_INVALID_HANDLE );
+        RtlSetLastWin32Error( ERROR_INVALID_HANDLE );
         return FALSE;
     }
     idx = (int)v - 1;
     if (!touch_slots[idx].in_use)
     {
-        SetLastError( ERROR_INVALID_HANDLE );
+        RtlSetLastWin32Error( ERROR_INVALID_HANDLE );
         return FALSE;
     }
     if (!ptr || (UINT)size < sizeof(TOUCHINPUT))
     {
-        SetLastError( ERROR_INVALID_PARAMETER );
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return FALSE;
     }
     n = count < touch_slots[idx].count ? count : touch_slots[idx].count;
@@ -109,13 +111,13 @@ BOOL WINAPI NtUserCloseTouchInputHandle( HTOUCHINPUT handle )
 
     if (!v || v > TOUCH_SLOT_COUNT)
     {
-        SetLastError( ERROR_INVALID_HANDLE );
+        RtlSetLastWin32Error( ERROR_INVALID_HANDLE );
         return FALSE;
     }
     idx = (int)v - 1;
     if (!InterlockedCompareExchange( &touch_slots[idx].in_use, 0, 1 ))
     {
-        SetLastError( ERROR_INVALID_HANDLE );
+        RtlSetLastWin32Error( ERROR_INVALID_HANDLE );
         return FALSE;
     }
     return TRUE;
@@ -123,56 +125,45 @@ BOOL WINAPI NtUserCloseTouchInputHandle( HTOUCHINPUT handle )
 
 """
 
-# Insert before send_hardware_input (unique anchor: whole function signature)
-WIN32U_ANCHOR = "NTSTATUS send_hardware_input( HWND hwnd, UINT flags, const INPUT *input, LPARAM lparam )"
-patch("dlls/win32u/input.c", WIN32U_ANCHOR,
-      TOUCH_SLOT_CODE + WIN32U_ANCHOR,
-      "insert touch slot table before send_hardware_input")
+MSG_C_ANCHOR = """\
+/***********************************************************************
+ *\t\tsend_hardware_message
+ */
+NTSTATUS send_hardware_message( HWND hwnd, UINT flags, const INPUT *input, LPARAM lparam )"""
 
-# ---------------------------------------------------------------------------
-# 1b. dlls/win32u/input.c — add WM_TOUCH intercept inside send_hardware_input
-#
-# Replace the whole send_hardware_input body so the anchor is unique and we
-# don't accidentally hit another server_send_hardware_message call site.
-# ---------------------------------------------------------------------------
+patch("dlls/win32u/message.c",
+      MSG_C_ANCHOR,
+      TOUCH_INFRA + MSG_C_ANCHOR,
+      "insert touch slot table before send_hardware_message")
 
-OLD_SEND = """\
-NTSTATUS send_hardware_input( HWND hwnd, UINT flags, const INPUT *input, LPARAM lparam )
-{
-    if (input->type == INPUT_MOUSE)
-    {
-        const struct raw_mouse empty_raw = {0}, *raw = lparam ? (void *)lparam : &empty_raw;
-        return accum_mouse_motion( hwnd, flags, *input, raw );
-    }
+# Add WM_TOUCH sentinel intercept inside send_hardware_message, before the
+# info.* initialisation block.
 
-    return server_send_hardware_message( hwnd, flags, input, lparam );
-}"""
+OLD_SEND_BODY = """\
+    info.type     = MSG_HARDWARE;
+    info.dest_tid = 0;
+    info.hwnd     = hwnd;
+    info.flags    = 0;
+    info.timeout  = 0;
+    info.params   = NULL;
 
-NEW_SEND = """\
-NTSTATUS send_hardware_input( HWND hwnd, UINT flags, const INPUT *input, LPARAM lparam )
-{
-    if (input->type == INPUT_MOUSE)
-    {
-        const struct raw_mouse empty_raw = {0}, *raw = lparam ? (void *)lparam : &empty_raw;
-        return accum_mouse_motion( hwnd, flags, *input, raw );
-    }
+    if (input->type == INPUT_MOUSE && (input->mi.dwFlags & (MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_RIGHTDOWN)))"""
 
-    /* WM_TOUCH sentinel: winex11.drv encodes one touch point in INPUT_HARDWARE
-     * with hi.uMsg=WM_TOUCH, hi.wParamL=touch_id, hi.wParamH=TOUCHEVENTF_* flags,
+NEW_SEND_BODY = """\
+    /* WM_TOUCH sentinel: winex11.drv sends INPUT_HARDWARE with hi.uMsg=WM_TOUCH,
+     * hi.wParamL=touch_id, hi.wParamH=TOUCHEVENTF_* flags,
      * lparam=MAKELPARAM(norm_x, norm_y) where coords are 0-65535 normalised.
-     * We store it in the touch slot ring buffer and post WM_TOUCH to the window
-     * so apps using RegisterTouchWindow (e.g. grandMA3 onPC) receive touch input. */
+     * Allocate a touch slot, post WM_TOUCH to the window, and return without
+     * going through the server (which doesn't know about HTOUCHINPUT handles). */
     if (input->type == INPUT_HARDWARE && input->hi.uMsg == WM_TOUCH)
     {
         RECT virtual = NtUserGetVirtualScreenRect( 2 /* MDT_RAW_DPI */ );
-        UINT norm_x = LOWORD( lparam ), norm_y = HIWORD( lparam );
+        UINT norm_x  = LOWORD( lparam ), norm_y = HIWORD( lparam );
         LONG screen_w = virtual.right  - virtual.left;
         LONG screen_h = virtual.bottom - virtual.top;
         TOUCHINPUT ti = { 0 };
         HTOUCHINPUT htouchinput;
 
-        /* Convert normalised 0-65535 coords to absolute screen pixels,
-         * then to hundredths-of-pixels as required by TOUCHINPUT.x/y. */
         ti.x         = screen_w ? (LONG)((ULONGLONG)norm_x * screen_w * 100 / 65535) : 0;
         ti.y         = screen_h ? (LONG)((ULONGLONG)norm_y * screen_h * 100 / 65535) : 0;
         ti.hSource   = NULL;
@@ -180,7 +171,7 @@ NTSTATUS send_hardware_input( HWND hwnd, UINT flags, const INPUT *input, LPARAM 
         ti.dwFlags   = input->hi.wParamH;  /* TOUCHEVENTF_* */
         ti.dwMask    = TOUCHINPUTMASKF_CONTACTAREA;
         ti.dwTime    = 0;
-        ti.cxContact = 100;  /* 1-pixel contact area */
+        ti.cxContact = 100;
         ti.cyContact = 100;
 
         if ((htouchinput = alloc_touch_slot( 1, &ti )))
@@ -188,10 +179,17 @@ NTSTATUS send_hardware_input( HWND hwnd, UINT flags, const INPUT *input, LPARAM 
         return STATUS_SUCCESS;
     }
 
-    return server_send_hardware_message( hwnd, flags, input, lparam );
-}"""
+    info.type     = MSG_HARDWARE;
+    info.dest_tid = 0;
+    info.hwnd     = hwnd;
+    info.flags    = 0;
+    info.timeout  = 0;
+    info.params   = NULL;
 
-patch("dlls/win32u/input.c", OLD_SEND, NEW_SEND, "add WM_TOUCH intercept in send_hardware_input")
+    if (input->type == INPUT_MOUSE && (input->mi.dwFlags & (MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_RIGHTDOWN)))"""
+
+patch("dlls/win32u/message.c", OLD_SEND_BODY, NEW_SEND_BODY,
+      "add WM_TOUCH intercept in send_hardware_message")
 
 # ---------------------------------------------------------------------------
 # 2. dlls/win32u/win32u.spec — add exports after NtUserPostMessage
@@ -212,10 +210,10 @@ patch(
 
 patch(
     "include/ntuser.h",
-    "W32KAPI BOOL WINAPI NtUserGetPointerInfoList(",
-    "W32KAPI BOOL WINAPI NtUserCloseTouchInputHandle( HTOUCHINPUT handle );\n"
-    "W32KAPI BOOL WINAPI NtUserGetTouchInputInfo( HTOUCHINPUT handle, UINT count, TOUCHINPUT *ptr, int size );\n"
-    "W32KAPI BOOL WINAPI NtUserGetPointerInfoList(",
+    "W32KAPI BOOL    WINAPI NtUserGetPointerInfoList( UINT32 id, POINTER_INPUT_TYPE type, UINT_PTR, UINT_PTR, SIZE_T size,",
+    "W32KAPI BOOL    WINAPI NtUserCloseTouchInputHandle( HTOUCHINPUT handle );\n"
+    "W32KAPI BOOL    WINAPI NtUserGetTouchInputInfo( HTOUCHINPUT handle, UINT count, TOUCHINPUT *ptr, int size );\n"
+    "W32KAPI BOOL    WINAPI NtUserGetPointerInfoList( UINT32 id, POINTER_INPUT_TYPE type, UINT_PTR, UINT_PTR, SIZE_T size,",
     "declare NtUserClose/GetTouchInput* in ntuser.h",
 )
 
@@ -287,20 +285,20 @@ patch(
 # 5. dlls/winex11.drv/mouse.c — synthesise WM_TOUCH from X11DRV_TouchEvent
 # ---------------------------------------------------------------------------
 
-# Replace the whole X11DRV_TouchEvent body (unique, long anchor)
 OLD_TOUCH_EVENT = """\
 static BOOL X11DRV_TouchEvent( HWND hwnd, XGenericEventCookie *xev )
 {
     RECT virtual = NtUserGetVirtualScreenRect( MDT_RAW_DPI );
     INPUT input = {.type = INPUT_HARDWARE};
     XIDeviceEvent *event = xev->data;
-    POINT pt = { event->event_x, event->event_y }, root = { event->root_x, event->root_y };
     int flags = 0;
     POINT pos;
 
-    pt = map_event_coords( hwnd, event->event, event->root, root, pt );
-    pos.x = pt.x * 65535 / (virtual.right - virtual.left);
-    pos.y = pt.y * 65535 / (virtual.bottom - virtual.top);
+    input.mi.dx = event->event_x;
+    input.mi.dy = event->event_y;
+    map_event_coords( hwnd, event->event, event->root, event->root_x, event->root_y, &input );
+    pos.x = input.mi.dx * 65535 / (virtual.right - virtual.left);
+    pos.y = input.mi.dy * 65535 / (virtual.bottom - virtual.top);
 
     switch (event->evtype)
     {
@@ -333,14 +331,15 @@ static BOOL X11DRV_TouchEvent( HWND hwnd, XGenericEventCookie *xev )
     INPUT input = {.type = INPUT_HARDWARE};
     INPUT touch_hw = {.type = INPUT_HARDWARE};
     XIDeviceEvent *event = xev->data;
-    POINT pt = { event->event_x, event->event_y }, root = { event->root_x, event->root_y };
     int flags = 0;
     WORD touch_flags = 0;
     POINT pos;
 
-    pt = map_event_coords( hwnd, event->event, event->root, root, pt );
-    pos.x = pt.x * 65535 / (virtual.right - virtual.left);
-    pos.y = pt.y * 65535 / (virtual.bottom - virtual.top);
+    input.mi.dx = event->event_x;
+    input.mi.dy = event->event_y;
+    map_event_coords( hwnd, event->event, event->root, event->root_x, event->root_y, &input );
+    pos.x = input.mi.dx * 65535 / (virtual.right - virtual.left);
+    pos.y = input.mi.dy * 65535 / (virtual.bottom - virtual.top);
 
     switch (event->evtype)
     {
@@ -362,24 +361,26 @@ static BOOL X11DRV_TouchEvent( HWND hwnd, XGenericEventCookie *xev )
         break;
     }
 
+    /* WM_POINTER* dispatch (existing path) */
     input.hi.wParamL = event->detail;
     input.hi.wParamH = POINTER_MESSAGE_FLAG_INRANGE | POINTER_MESSAGE_FLAG_INCONTACT | flags;
     NtUserSendHardwareInput( hwnd, 0, &input, MAKELPARAM( pos.x, pos.y ) );
 
-    /* Synthesise WM_TOUCH for apps using RegisterTouchWindow (e.g. grandMA3 onPC).
-     * Use WM_TOUCH as a sentinel in INPUT_HARDWARE.hi.uMsg; win32u's
-     * send_hardware_input allocates a touch slot and posts WM_TOUCH to hwnd. */
+    /* WM_TOUCH synthesis for apps using RegisterTouchWindow (e.g. grandMA3 onPC).
+     * WM_TOUCH as hi.uMsg acts as a sentinel: send_hardware_message intercepts it,
+     * allocates a TOUCHINPUT slot, and posts WM_TOUCH to the window. */
     if (touch_flags)
     {
         touch_hw.hi.uMsg    = WM_TOUCH;
         touch_hw.hi.wParamL = (WORD)event->detail;  /* XI2 touch point ID */
-        touch_hw.hi.wParamH = touch_flags;           /* TOUCHEVENTF_* flags */
+        touch_hw.hi.wParamH = touch_flags;           /* TOUCHEVENTF_* */
         NtUserSendHardwareInput( hwnd, 0, &touch_hw, MAKELPARAM( (WORD)pos.x, (WORD)pos.y ) );
     }
 
     return TRUE;
 }"""
 
-patch("dlls/winex11.drv/mouse.c", OLD_TOUCH_EVENT, NEW_TOUCH_EVENT, "add WM_TOUCH synthesis in X11DRV_TouchEvent")
+patch("dlls/winex11.drv/mouse.c", OLD_TOUCH_EVENT, NEW_TOUCH_EVENT,
+      "add WM_TOUCH synthesis in X11DRV_TouchEvent")
 
-print("\\nAll WM_TOUCH patches applied successfully.")
+print("\nAll WM_TOUCH patches applied successfully.")
