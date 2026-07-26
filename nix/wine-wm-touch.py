@@ -170,7 +170,10 @@ NEW_SEND_BODY = """\
             const TOUCHINPUT *inputs = (const TOUCHINPUT *)(ULONG_PTR)lparam;
             UINT count = input->hi.wParamL;
             if ((htouchinput = alloc_touch_slot( count, inputs )))
+            {
                 NtUserPostMessage( root, WM_TOUCH, MAKEWPARAM( count, 0 ), (LPARAM)htouchinput );
+                NtUserCloseTouchInputHandle( htouchinput );
+            }
             return STATUS_SUCCESS;
         }
 
@@ -193,7 +196,10 @@ NEW_SEND_BODY = """\
             ti.cyContact = 100;
 
             if ((htouchinput = alloc_touch_slot( 1, &ti )))
+            {
                 NtUserPostMessage( root, WM_TOUCH, MAKEWPARAM( 1, 0 ), (LPARAM)htouchinput );
+                NtUserCloseTouchInputHandle( htouchinput );
+            }
             return STATUS_SUCCESS;
         }
     }
