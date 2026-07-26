@@ -740,7 +740,15 @@ static BOOL X11DRV_TouchEvent( HWND hwnd, XGenericEventCookie *xev )
         }
     }
 
-    /* Mouse compat: LMB only for single-finger touch events */
+    /* Mouse compat: LMB + MOUSEMOVE for single-finger touch */
+    if (!skip_lmb && xi2_count == 1 && event->evtype == XI_TouchUpdate)
+    {
+        INPUT mouse_mv = {.type = INPUT_MOUSE};
+        mouse_mv.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK | MOUSEEVENTF_MOVE;
+        mouse_mv.mi.dx = (LONG)pos.x;
+        mouse_mv.mi.dy = (LONG)pos.y;
+        NtUserSendHardwareInput( hwnd, 0, &mouse_mv, 0 );
+    }
     if (!skip_lmb &&
         (event->evtype == XI_TouchBegin || event->evtype == XI_TouchEnd))
     {
