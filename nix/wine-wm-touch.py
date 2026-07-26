@@ -544,11 +544,20 @@ static BOOL X11DRV_TouchEvent( HWND hwnd, XGenericEventCookie *xev )
 }"""
 
 NEW_TOUCH_EVENT = """\
-/* --- WineMA3: active XI2 touch point tracker for multi-finger WM_TOUCH --- */
+/* --- WineMA3: active XI2 touch point tracker + gesture synthesis --- */
 #define XI2_MAX_TOUCH 10
 struct xi2_touch_point { int id; LONG screen_x; LONG screen_y; DWORD flags; };
 static struct xi2_touch_point xi2_active[XI2_MAX_TOUCH];
 static int xi2_count;
+
+/* 2-finger gesture state:
+ *   tap  (< 400ms, < 20px movement) -> right-click
+ *   move (>= 20px movement)         -> WM_MOUSEWHEEL from vertical delta */
+static BOOL xi2_two_finger_active;
+static BOOL xi2_two_finger_scroll;
+static unsigned long xi2_two_finger_start_time;
+static LONG xi2_tap_cx, xi2_tap_cy;
+static LONG xi2_prev_centroid_y;
 
 static BOOL X11DRV_TouchEvent( HWND hwnd, XGenericEventCookie *xev )
 {
@@ -559,6 +568,7 @@ static BOOL X11DRV_TouchEvent( HWND hwnd, XGenericEventCookie *xev )
     int flags = 0;
     DWORD touch_flags = 0;
     int ti_idx = -1;
+    BOOL skip_lmb = FALSE;
     int i;
     POINT pos;
 
@@ -583,6 +593,30 @@ static BOOL X11DRV_TouchEvent( HWND hwnd, XGenericEventCookie *xev )
             xi2_active[ti_idx].screen_y = (LONG)input.mi.dy;
             xi2_active[ti_idx].flags    = touch_flags;
         }
+        if (xi2_count == 2)
+        {
+            /* Cancel the LMB-down that was sent for finger 1 */
+            INPUT lmb_cancel = {.type = INPUT_MOUSE};
+            lmb_cancel.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
+                                    | MOUSEEVENTF_LEFTUP;
+            lmb_cancel.mi.dx = xi2_active[0].screen_x * 65535 / (virtual.right - virtual.left);
+            lmb_cancel.mi.dy = xi2_active[0].screen_y * 65535 / (virtual.bottom - virtual.top);
+            NtUserSendHardwareInput( hwnd, 0, &lmb_cancel, 0 );
+            xi2_two_finger_active     = TRUE;
+            xi2_two_finger_scroll     = FALSE;
+            xi2_two_finger_start_time = event->time;
+            xi2_tap_cx = (xi2_active[0].screen_x + xi2_active[1].screen_x) / 2;
+            xi2_tap_cy = (xi2_active[0].screen_y + xi2_active[1].screen_y) / 2;
+            xi2_prev_centroid_y = xi2_tap_cy;
+            skip_lmb = TRUE;
+        }
+        else if (xi2_count > 2 && xi2_two_finger_active)
+        {
+            /* 3+ fingers: cancel 2-finger gesture to avoid spurious right-click */
+            xi2_two_finger_active = FALSE;
+            xi2_two_finger_scroll = TRUE;
+            skip_lmb = TRUE;
+        }
         break;
     case XI_TouchEnd:
         input.hi.uMsg = WM_POINTERUP;
@@ -596,6 +630,30 @@ static BOOL X11DRV_TouchEvent( HWND hwnd, XGenericEventCookie *xev )
                 xi2_active[i].screen_y = (LONG)input.mi.dy;
                 xi2_active[i].flags    = touch_flags;
             }
+        /* Suppress LMB when lifting from a multi-finger context */
+        if (xi2_count >= 2) skip_lmb = TRUE;
+        if (xi2_two_finger_active && xi2_count == 1)
+        {
+            /* Last finger of a 2-finger gesture: decide tap vs scroll */
+            xi2_two_finger_active = FALSE;
+            skip_lmb = TRUE;
+            if (!xi2_two_finger_scroll &&
+                (event->time - xi2_two_finger_start_time) < 400)
+            {
+                /* 2-finger tap: synthesize right-click at gesture centroid */
+                LONG cx_n = xi2_tap_cx * 65535 / (virtual.right - virtual.left);
+                LONG cy_n = xi2_tap_cy * 65535 / (virtual.bottom - virtual.top);
+                INPUT rbtn = {.type = INPUT_MOUSE};
+                rbtn.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
+                                  | MOUSEEVENTF_RIGHTDOWN;
+                rbtn.mi.dx = cx_n; rbtn.mi.dy = cy_n;
+                NtUserSendHardwareInput( hwnd, 0, &rbtn, 0 );
+                rbtn.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
+                                  | MOUSEEVENTF_RIGHTUP;
+                NtUserSendHardwareInput( hwnd, 0, &rbtn, 0 );
+                TRACE("XI_Touch 2-finger tap -> right-click at %ldx%ld\\n", cx_n, cy_n);
+            }
+        }
         break;
     case XI_TouchUpdate:
         input.hi.uMsg = WM_POINTERUPDATE;
@@ -609,6 +667,33 @@ static BOOL X11DRV_TouchEvent( HWND hwnd, XGenericEventCookie *xev )
                 xi2_active[i].screen_y = (LONG)input.mi.dy;
                 xi2_active[i].flags    = touch_flags;
             }
+        if (xi2_count == 2 && xi2_two_finger_active)
+        {
+            LONG cy = (xi2_active[0].screen_y + xi2_active[1].screen_y) / 2;
+            LONG cx = (xi2_active[0].screen_x + xi2_active[1].screen_x) / 2;
+            LONG move_dx = cx - xi2_tap_cx, move_dy = cy - xi2_tap_cy;
+            if (move_dx * move_dx + move_dy * move_dy > 20 * 20)
+                xi2_two_finger_scroll = TRUE;
+            if (xi2_two_finger_scroll)
+            {
+                LONG delta_y = xi2_prev_centroid_y - cy;
+                if (delta_y != 0)
+                {
+                    SHORT wheel_d = (SHORT)(delta_y * 120 / 30);
+                    if (wheel_d)
+                    {
+                        INPUT wheel = {.type = INPUT_MOUSE};
+                        wheel.mi.dwFlags   = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
+                                             | MOUSEEVENTF_WHEEL;
+                        wheel.mi.dx        = pos.x;
+                        wheel.mi.dy        = pos.y;
+                        wheel.mi.mouseData = (DWORD)(SHORT)wheel_d;
+                        NtUserSendHardwareInput( hwnd, 0, &wheel, 0 );
+                    }
+                }
+            }
+            xi2_prev_centroid_y = cy;
+        }
         break;
     }
 
@@ -616,16 +701,12 @@ static BOOL X11DRV_TouchEvent( HWND hwnd, XGenericEventCookie *xev )
     if (xi2_count > 0) xi2_active[0].flags |= TOUCHEVENTF_PRIMARY;
     for (i = 1; i < xi2_count; i++) xi2_active[i].flags &= ~TOUCHEVENTF_PRIMARY;
 
-    /* WM_POINTER* dispatch (existing path, keeps cursor tracking) */
+    /* WM_POINTER* dispatch (keeps cursor tracking) */
     input.hi.wParamL = event->detail;
     input.hi.wParamH = POINTER_MESSAGE_FLAG_INRANGE | POINTER_MESSAGE_FLAG_INCONTACT | flags;
     NtUserSendHardwareInput( hwnd, 0, &input, MAKELPARAM( pos.x, pos.y ) );
 
-    /* WM_TOUCH synthesis.  Single-point (xi2_count==1): pack coords in lparam.
-     * Multi-point (xi2_count>1): pass stack TOUCHINPUT[] via lparam pointer,
-     * wParamH=0xFFFF sentinel so send_hardware_message takes the multi path.
-     * send_hardware_message copies to a static slot before returning, so the
-     * stack array is valid for the entire synchronous call. */
+    /* WM_TOUCH synthesis */
     if (xi2_count > 0)
     {
         if (xi2_count == 1)
@@ -633,7 +714,8 @@ static BOOL X11DRV_TouchEvent( HWND hwnd, XGenericEventCookie *xev )
             touch_hw.hi.uMsg    = WM_TOUCH;
             touch_hw.hi.wParamL = (WORD)event->detail;
             touch_hw.hi.wParamH = (WORD)xi2_active[0].flags;
-            NtUserSendHardwareInput( hwnd, 0, &touch_hw, MAKELPARAM( (WORD)pos.x, (WORD)pos.y ) );
+            NtUserSendHardwareInput( hwnd, 0, &touch_hw,
+                                     MAKELPARAM( (WORD)pos.x, (WORD)pos.y ) );
         }
         else
         {
@@ -658,18 +740,20 @@ static BOOL X11DRV_TouchEvent( HWND hwnd, XGenericEventCookie *xev )
         }
     }
 
-    /* Mouse compat: synthesize WM_LBUTTONDOWN/UP for apps that use mouse events */
-    if (event->evtype == XI_TouchBegin || event->evtype == XI_TouchEnd)
+    /* Mouse compat: LMB only for single-finger touch events */
+    if (!skip_lmb &&
+        (event->evtype == XI_TouchBegin || event->evtype == XI_TouchEnd))
     {
         INPUT mouse_hw = {.type = INPUT_MOUSE};
         mouse_hw.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK |
-                              (event->evtype == XI_TouchBegin ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP);
+                              (event->evtype == XI_TouchBegin
+                               ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP);
         mouse_hw.mi.dx = (LONG)pos.x;
         mouse_hw.mi.dy = (LONG)pos.y;
         NtUserSendHardwareInput( hwnd, 0, &mouse_hw, 0 );
     }
 
-    /* Remove lifting point from tracker after sending WM_TOUCH */
+    /* Remove lifting point from tracker */
     if (event->evtype == XI_TouchEnd && ti_idx >= 0)
     {
         xi2_count--;
