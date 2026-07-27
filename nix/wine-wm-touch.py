@@ -645,7 +645,7 @@ static BOOL X11DRV_TouchEvent( HWND hwnd, XGenericEventCookie *xev )
                 LONG cy_n = xi2_tap_cy * 65535 / (virtual.bottom - virtual.top);
                 INPUT rbtn = {.type = INPUT_MOUSE};
                 rbtn.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
-                                  | MOUSEEVENTF_MOVE | MOUSEEVENTF_RIGHTDOWN;
+                                  | MOUSEEVENTF_RIGHTDOWN;
                 rbtn.mi.dx = cx_n; rbtn.mi.dy = cy_n;
                 NtUserSendHardwareInput( hwnd, 0, &rbtn, 0 );
                 rbtn.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
@@ -682,16 +682,11 @@ static BOOL X11DRV_TouchEvent( HWND hwnd, XGenericEventCookie *xev )
                     SHORT wheel_d = (SHORT)(delta_y * 120 / 30);
                     if (wheel_d)
                     {
-                        LONG cen_xn = cx * 65535 / (virtual.right - virtual.left);
-                        LONG cen_yn = cy * 65535 / (virtual.bottom - virtual.top);
                         INPUT wheel = {.type = INPUT_MOUSE};
-                        /* MOVE+WHEEL together: positions cursor at centroid so
-                         * WM_MOUSEWHEEL reaches the window under the touch (not
-                         * the stale touchpad cursor position). */
                         wheel.mi.dwFlags   = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
-                                             | MOUSEEVENTF_MOVE | MOUSEEVENTF_WHEEL;
-                        wheel.mi.dx        = cen_xn;
-                        wheel.mi.dy        = cen_yn;
+                                             | MOUSEEVENTF_WHEEL;
+                        wheel.mi.dx        = pos.x;
+                        wheel.mi.dy        = pos.y;
                         wheel.mi.mouseData = (DWORD)(SHORT)wheel_d;
                         NtUserSendHardwareInput( hwnd, 0, &wheel, 0 );
                     }
@@ -758,12 +753,7 @@ static BOOL X11DRV_TouchEvent( HWND hwnd, XGenericEventCookie *xev )
         (event->evtype == XI_TouchBegin || event->evtype == XI_TouchEnd))
     {
         INPUT mouse_hw = {.type = INPUT_MOUSE};
-        /* Include MOUSEEVENTF_MOVE so the cursor positions at the touch point
-         * before the button event fires — INPUT_HARDWARE (WM_POINTER*) does not
-         * update the system cursor, so without this the click lands at the stale
-         * touchpad cursor position rather than where the user touched. */
         mouse_hw.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK |
-                              MOUSEEVENTF_MOVE |
                               (event->evtype == XI_TouchBegin
                                ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP);
         mouse_hw.mi.dx = (LONG)pos.x;
