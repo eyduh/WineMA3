@@ -179,7 +179,7 @@ in
     # grandMA3 onPC Command Wing (USB 2dbe:b5c8) — grant the logged-in seat user
     # r/w access so Wine can reach it via libusb without a custom group or sudo.
     services.udev.extraRules = ''
-      SUBSYSTEM=="usb", ATTRS{idVendor}=="2dbe", ATTRS{idProduct}=="b5c8", TAG+="uaccess"
+      SUBSYSTEM=="usb", ATTRS{idVendor}=="2dbe", ATTRS{idProduct}=="b5c8", MODE="0666"
     '';
 
     # ── Wine capabilities ─────────────────────────────────────────────────────
