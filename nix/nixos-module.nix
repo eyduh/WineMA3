@@ -174,6 +174,14 @@ in
       });
     '';
 
+    # ── Hardware access ───────────────────────────────────────────────────────
+
+    # grandMA3 onPC Command Wing (USB 2dbe:b5c8) — grant the logged-in seat user
+    # r/w access so Wine can reach it via libusb without a custom group or sudo.
+    services.udev.extraRules = ''
+      SUBSYSTEM=="usb", ATTRS{idVendor}=="2dbe", ATTRS{idProduct}=="b5c8", TAG+="uaccess"
+    '';
+
     # ── Wine capabilities ─────────────────────────────────────────────────────
 
     security.wrappers.wineserver = mkIf cfg.wineserver.capNetRaw {
