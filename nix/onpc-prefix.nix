@@ -22,7 +22,7 @@
   # Directory name grandMA3 onPC installs into, and the prefix dir name the
   # gma3-wine launcher looks for under $XDG_DATA_HOME/winema3/. Must match
   # installer.install_dir_name (wine_ma3/installers.py) → "gma3_<major.minor.sub>".
-, installDir ? "gma3_2.4.2"
+, installDir ? "gma3_${lib.concatStringsSep "." (lib.take 3 (lib.splitVersion version))}"
 , installer ? fetchurl {
     name = "grandMA3_onPC_win_v${version}.zip";
     url = "https://xom.malighting.com/xom-rest/assets/fb019be2-3317-49ff-9110-e04f2b9be5b4/content?access_token=9FKEHm7BKIFd3pJh-6OobEGYsas";
