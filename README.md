@@ -40,12 +40,15 @@ Supported setups:
 | Output | Description |
 |--------|-------------|
 | `packages.default` / `packages.winema3` | The WineMA3 package (`winema3-install`, `winema3-probe`, `winema3-uninstall` wrappers with Wine, DXVK, mingw stubs, etc. baked into `PATH`). |
+| `packages.onpc-prefix` | Prebuilt, **unfree** grandMA3 onPC 2.4.2.2 Wine prefix (built from the official MA Lighting installer). |
+| `packages.winema3-install-prefix` | Idempotent helper that copies `packages.onpc-prefix` into `~/.local/share/winema3/`. |
 | `apps.default` / `apps.install` | Runs `winema3-install`. |
 | `apps.probe` | Runs `winema3-probe` (system probe, installs nothing). |
 | `apps.uninstall` | Runs `winema3-uninstall`. |
 | `devShells.default` | Dev shell with Python + Rich, Wine, winetricks, DXVK, mingw cross-compilers, and the runtime tooling. |
 | `overlays.default` | Adds `pkgs.winema3`. |
 | `nixosModules.default` / `nixosModules.winema3` | The `programs.winema3` NixOS module. |
+| `homeModules.default` / `homeModules.winema3` | The `programs.winema3` Home Manager module. |
 
 ## Running The Installer
 
@@ -148,34 +151,45 @@ is in scope.
 
 ### Setup, end to end
 
-Getting from nothing to a running console is a **two-phase** process: the module
-is declarative Nix, but the Wine prefix is populated once by an imperative
-installer run, and you launch with an ordinary command. In order:
+There are two ways to get a running console:
 
-1. **Get the installer** (not Nix). Download the Windows grandMA3 onPC EXE/ZIP
-   from MA Lighting and drop it in the installer directory:
+**Declarative (preferred)** — let the module build and install the onPC prefix
+for you. Add `programs.winema3.onpcPrefix.enable = true` and accept the MA
+Lighting EULA explicitly:
+
+```nix
+{
+  programs.winema3 = {
+    enable = true;
+    launchMode = "on-demand";
+    openFirewall = true;
+    keepAwake = false;
+
+    onpcPrefix = {
+      enable = true;
+      acceptEULA = true;
+    };
+  };
+}
+```
+
+Rebuild, log out and back in (or run `winema3-install-prefix` once), and the
+prebuilt grandMA3 onPC 2.4.2.2 prefix is copied into `~/.local/share/winema3/`.
+Launch with `gma3-wine` or the **grandMA3 (Wine)** menu entry.
+
+**Imperative** — supply the installer yourself and run `winema3-install` once:
+
+1. Download the Windows grandMA3 onPC EXE/ZIP from MA Lighting and drop it in
+   the installer directory:
    ```bash
    mkdir -p ~/.local/share/winema3/ma3onpcinstaller
    cp grandMA3_onPC_win_v*.zip ~/.local/share/winema3/ma3onpcinstaller/
    ```
-2. **Enable the module** (Nix). Add the `programs.winema3` block above and
-   rebuild:
-   ```bash
-   sudo nixos-rebuild switch --flake .#<host>
-   ```
-   This installs the launcher, desktop entry, firewall rules, and the
-   `winema3-install` package on `PATH` — but does **not** create the prefix yet.
-3. **Populate the Wine prefix** (Nix, one time). Run the installer once; it
-   creates the prefix, installs onPC, DXVK, and the wintrust stub:
-   ```bash
-   winema3-install
-   ```
-   The module sets `WINEMA3_MANAGED=1`, so this writes nothing into `$HOME` —
-   it only fills the prefix under `~/.local/share/winema3/`.
-4. **Launch** (not Nix). `gma3-wine`, or the **grandMA3 (Wine)** menu entry.
+2. Enable the module with `programs.winema3.enable = true` and rebuild.
+3. Run `winema3-install` once to create the prefix.
+4. Launch with `gma3-wine`.
 
-Re-run step 3 only to upgrade onPC or repair the prefix; steps 2 and 4 are the
-everyday path.
+Re-run `winema3-install` only to upgrade onPC or repair the prefix.
 
 ### Options
 
@@ -187,6 +201,9 @@ everyday path.
 | `programs.winema3.openFirewall` | bool | `true` | Open MA-Net ports: UDP `30020`, TCP `8080` and `30022`–`30040`. |
 | `programs.winema3.wineserver.capNetRaw` | bool | `true` | Wrap `wineserver` with `cap_net_raw=ep` for MA-Net multicast. |
 | `programs.winema3.keepAwake` | bool | `false` | Inhibit sleep and suppress idle/screen-blanking while grandMA3 runs (**disables** power saving so a show never suspends or blanks mid-cue). |
+| `programs.winema3.onpcPrefix.enable` | bool | `false` | Declaratively build and install the prebuilt grandMA3 onPC Wine prefix. |
+| `programs.winema3.onpcPrefix.acceptEULA` | bool | `false` | Must be `true` to use `onpcPrefix.enable`; asserts that you accept the MA Lighting EULA (see `nix/onpc-eula.txt`). |
+| `programs.winema3.onpcPrefix.package` | package | `packages.onpc-prefix` | Prebuilt prefix package to install. Override to change version or installer source. |
 
 ### Launch modes
 
@@ -225,9 +242,18 @@ capabilities (those require root).
     enable = true;
     launchMode = "on-demand";   # "always" | "on-demand"
     keepAwake = false;
+
+    onpcPrefix = {
+      enable = true;
+      acceptEULA = true;
+    };
   };
 }
 ```
+
+When `onpcPrefix.enable = true`, the prefix is copied into
+`~/.local/share/winema3/` automatically during `home-manager switch` once you
+accept the EULA.
 
 ### Wiring the input into standalone Home Manager
 
@@ -294,6 +320,7 @@ What the Home Manager module reproduces vs. the NixOS module:
 | `keepAwake` sleep inhibition (user service) | ✅ | ✅ |
 | `keepAwake` idle/DPMS/screensaver suppression | ✅ | ✅ |
 | `launchMode` scoping of the above | ✅ | ✅ |
+| Declarative onPC prefix install | ✅ | ✅ |
 | `openFirewall` (MA-Net ports) | ❌ needs root | ✅ |
 | `wineserver` `cap_net_raw` | ❌ needs root | ✅ |
 | polkit rule for the firewall unit | ❌ needs root | ✅ |

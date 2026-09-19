@@ -29,6 +29,20 @@ let
   common = import ./common.nix { inherit pkgs lib; };
   inherit (common) noPowerSaveScript autostartDesktop;
 
+  # Full text of the MA Lighting EULA used by the onPC prefix assertion.
+  eulaText = builtins.readFile ./onpc-eula.txt;
+
+  # Default prebuilt grandMA3 onPC Wine prefix (proprietary / unfree).
+  defaultOnpcPrefix = pkgs.callPackage ./onpc-prefix.nix {
+    winema3 = cfg.package;
+    xvfb = pkgs."xorg-server";
+  };
+
+  # Idempotent copy helper for the selected prefix package.
+  installPrefix = pkgs.callPackage ./onpc-prefix-install.nix { } {
+    prefix = cfg.onpcPrefix.package;
+  };
+
   # On a non-NixOS host the Nix-built wine can't reach the system GPU driver, so
   # grandMA3 aborts with "Application needs opengl >= 4.3". Route wine through
   # nixGL — for OpenGL AND the Vulkan ICD that DXVK needs.
@@ -119,11 +133,48 @@ in
         In "on-demand" mode both are scoped to the grandMA3 session via winema3-wrap.
       '';
     };
+
+    onpcPrefix.enable = mkEnableOption "declarative grandMA3 onPC prefix installation";
+
+    onpcPrefix.package = mkOption {
+      type = types.package;
+      default = defaultOnpcPrefix;
+      defaultText = lib.literalExpression "pkgs.callPackage ./onpc-prefix.nix { winema3 = cfg.package; xvfb = pkgs.\\\"xorg-server\\\"; }";
+      description = ''
+        Prebuilt grandMA3 onPC Wine prefix package to install into the user's
+        XDG data directory. Override to change the onPC version or installer source.
+      '';
+    };
+
+    onpcPrefix.acceptEULA = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        Accept the MA Lighting End User License Agreement for grandMA3 onPC.
+        This must be set to true to use programs.winema3.onpcPrefix.enable.
+        The EULA text is included in this repository at nix/onpc-eula.txt.
+      '';
+    };
   };
 
   config = mkIf cfg.enable {
 
-    home.packages = [ cfg.package wineLauncher wineDesktop ]
+    assertions = [
+      {
+        assertion = !cfg.onpcPrefix.enable || cfg.onpcPrefix.acceptEULA;
+        message = ''
+          programs.winema3.onpcPrefix.enable requires
+          programs.winema3.onpcPrefix.acceptEULA = true.
+
+          You must accept the MA Lighting End User License Agreement before using
+          grandMA3 onPC. The full text is in nix/onpc-eula.txt and reproduced below:
+
+          ${eulaText}
+        '';
+      }
+    ];
+
+    home.packages = [ cfg.package wineLauncher wineDesktop installPrefix ]
       ++ optional needWrapper launchWrapperBin;
 
     # Tell the runtime installer the launcher/desktop entry are managed here, so
@@ -161,5 +212,14 @@ in
       and 30022-30040, and granting wineserver cap_net_raw — needs root: use the
       NixOS module on NixOS, or let `winema3-install` apply them via its prompts.
     '';
+
+    # Idempotently copy the prebuilt prefix into ~/.local/share/winema3 during
+    # home-manager switch. The marker file avoids repeated copies once the prefix
+    # is in place and matches the current store path.
+    home.activation.winema3-onpc-prefix = mkIf cfg.onpcPrefix.enable (
+      lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+        $DRY_RUN_CMD ${installPrefix}/bin/winema3-install-prefix
+      ''
+    );
   };
 }

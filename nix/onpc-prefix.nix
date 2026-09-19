@@ -1,20 +1,16 @@
 # Prebuilt grandMA3 onPC Wine prefix.
 #
-# Runs the proprietary MA Lighting onPC installer (supplied by you via
-# requireFile — never redistributed), DXVK, and the wintrust stub headlessly at
-# BUILD time, and captures the finished Wine prefix as a store path. Copy it into
-# place on a device with `winema3-install-prefix` instead of re-running the whole
-# install — the store path is content-addressed by inputs, so once built (e.g. on
-# arcus) it can be pulled from a private binary cache (Harmonia) by your devices.
+# Downloads the proprietary MA Lighting onPC installer at evaluation/build time
+# (never redistributed by this repo), runs it headlessly with DXVK and the
+# wintrust stub, and captures the finished Wine prefix as a store path. The
+# resulting derivation is unfree and embeds the proprietary software, so it
+# must NOT be served from a PUBLIC binary cache.
 #
-# UNFREE: the output embeds grandMA3 onPC, proprietary MA Lighting software. It is
-# marked unfree so you must explicitly accept it (NIXPKGS_ALLOW_UNFREE=1 or
-# nixpkgs.config.allowUnfree). Do NOT serve it from a PUBLIC cache — that
-# redistributes MA's software. A private/authenticated cache for your own
-# licensed devices is the intended use.
+# Defaults target the baked-in grandMA3 onPC 2.4.2.2 Windows installer. Override
+# `src`, `version`, and `installDir` to target another release.
 { lib
 , stdenv
-, requireFile
+, fetchurl
 , unzip
 , wineWow64Packages
 , dxvk
@@ -22,36 +18,23 @@
 , coreutils
 , findutils
 , winema3
-, version ? "2.3.2.0"
+, version ? "2.4.2.2"
   # Directory name grandMA3 onPC installs into, and the prefix dir name the
   # gma3-wine launcher looks for under $XDG_DATA_HOME/winema3/. Must match
   # installer.install_dir_name (wine_ma3/installers.py) → "gma3_<major.minor.sub>".
-, installDir ? "gma3_2.3.2"
+, installDir ? "gma3_2.4.2"
+, installer ? fetchurl {
+    name = "grandMA3_onPC_win_v${version}.zip";
+    url = "https://xom.malighting.com/xom-rest/assets/fb019be2-3317-49ff-9110-e04f2b9be5b4/content?access_token=9FKEHm7BKIFd3pJh-6OobEGYsas";
+    sha256 = "1q2kascjp4bd2pnn8g88y0xgb8034nnsbbv957g21g1nnsa6xlci";
+  }
 }:
 
 stdenv.mkDerivation {
   pname = "grandma3-onpc-prefix";
   inherit version;
 
-  # You supply the file. Compute the hash once with:
-  #   nix hash file grandMA3_onPC_win_v2.3.2.0.zip
-  # then add it to the store so the build can find it:
-  #   nix store add-file --name grandMA3_onPC_win_v2.3.2.0.zip <path>
-  src = requireFile {
-    name = "grandMA3_onPC_win_v${version}.zip";
-    sha256 = lib.fakeSha256; # TODO: replace with the real hash (see message)
-    message = ''
-      grandMA3 onPC ${version} is proprietary MA Lighting software and is not
-      redistributed by this flake. Download grandMA3_onPC_win_v${version}.zip
-      from MA Lighting (https://www.malighting.com/), then:
-
-        nix hash file grandMA3_onPC_win_v${version}.zip   # get the sha256
-        # put that hash in nix/onpc-prefix.nix (src.sha256), then:
-        nix store add-file --name grandMA3_onPC_win_v${version}.zip \
-          /path/to/grandMA3_onPC_win_v${version}.zip
-    '';
-  };
-
+  src = installer;
   dontUnpack = true;
 
   nativeBuildInputs = [
@@ -64,7 +47,7 @@ stdenv.mkDerivation {
   ];
 
   # Wine prefixes are inherently non-deterministic (timestamps, generated GUIDs),
-  # but the derivation is keyed by its inputs, so a cache still serves it fine.
+  # but the derivation is keyed by its inputs, so a private cache still serves it fine.
   buildPhase = ''
     runHook preBuild
 
@@ -99,6 +82,9 @@ stdenv.mkDerivation {
     fi
 
     # DXVK via the nixpkgs setup_dxvk.sh (DLL store paths baked in; no network).
+    # setup_dxvk.sh uses `fold -w $COLUMNS` under `set -u`; COLUMNS is not always
+    # set in non-interactive build environments, so provide a fallback.
+    export COLUMNS="''${COLUMNS:-80}"
     setup_dxvk.sh install
     wineserver -w
 
@@ -125,6 +111,10 @@ stdenv.mkDerivation {
     cp -r "$WINEPREFIX" "$out/${installDir}"
     runHook postInstall
   '';
+
+  passthru = {
+    inherit installDir;
+  };
 
   meta = {
     description = "Prebuilt grandMA3 onPC ${version} Wine prefix (proprietary MA Lighting software)";

@@ -1,0 +1,287 @@
+MA Lighting Technology GmbH "MA Lighting"
+End User Licensing Agreement ("license") for MA Lighting software
+"grandMA onPC" / "grandMA2 onPC" / "grandMA3 onPC" / dot2 onPC /
+MA VPU / MA 3D and MA Lighting controller software "grandMA Console" /
+"grandMA2 Console" / "grandMA3 Console" / dot2 Console (the "software")
+
+Version: 2025-07
+Source: https://www.malighting.com/files/malighting/user_upload/Rechtstexte/EULA.pdf
+
+PLEASE READ THIS SOFTWARE LICENSE AGREEMENT ("LICENSE") CAREFULLY BEFORE
+USING THE SOFTWARE.
+
+BY USING (INCLUDING BUT NOT LIMITED TO: INSTALLING, STORING, COPYING,
+SHOWING, TESTING, DEMONSTRATING, EVALUATING, PRESENTING, APPLYING,
+DISTRIBUTING, REDISTRIBUTING, RUNNING AND / OR DOCUMENTING) THE SOFTWARE,
+YOU ARE AGREEING TO BE BOUND BY THE TERMS OF THIS LICENSE, UNLESS YOU DELETE
+THE SOFTWARE AND ALL INSTANCES AND COPIES AND VERSIONS FROM ALL SYSTEMS UNDER
+YOUR CONTROL, POSSESSION OR OWNERSHIP.
+
+THE USE OF THIS SOFTWARE MAY BE GOVERNED BY LOCAL LEGISLATION IN DIFFERENT
+COUNTRIES, PROTECTING INTELLECTUAL PROPERTY RIGHTS IN THIS SOFTWARE BY VIRTUE
+OF REGISTRATION OR FIRST PUBLICATION OR OTHER RULES OR LAWS. USING THIS
+SOFTWARE YOU INHERENTLY AGREE TO BE BOUND AND SUBJECT TO THESE APPLICABLE LAWS.
+
+IMPORTANT NOTE:
+This software may contain information or reproduce information that is subject
+to copyrights. The software is licensed to you only for reproduction of
+information in which you own the copyright or you are authorized or legally
+permitted to reproduce.
+
+1. General
+The software whether downloaded, pre-installed or made available to you by any
+other means is licensed to you, not sold, under the terms of this license. MA
+Lighting retains legal ownership of the software itself and retains all rights
+to it unless expressly granted to you. The terms of this license also govern all
+future upgrades, versions or updates provided by MA Lighting, even if the
+original software is replaced or supplemented unless the software comes with a
+separate license that expressly supersedes this license. These terms shall
+supersede previous terms and shall govern the use or prior versions of the
+software whether actively used or kept for backup purposes only. Title and
+intellectual property rights in and to any content displayed by or accessed
+through the software belong to the respective content owner. Such content may be
+protected by copyright or other intellectual property laws and treaties, and may
+be subject to terms of use of the third party providing such contents. This
+license does not grant you any rights to use such content nor does it guarantee
+that such content will continue to be available to you.
+
+MA Lighting Technology GmbH - Dachdeckerstr. 16 - 97297 Waldbuttelbrunn - Germany
+
+2. Permitted License Uses and Restrictions
+Subject to the terms and conditions of this license you are granted a limited
+non-exclusive license to use this software on multiple instances of MA Lighting
+approved or licensed hardware at any time, where licensed hardware refers to
+original equipment purchased from MA Lighting or its authorized distribution
+partners or to original equipment purchased used from an authorized third person.
+You are entitled to upgrade or update only MA Lighting approved or license
+hardware with this software. Any installation, upgrade or update of the
+software on other hardware is a violation of the terms and conditions of this
+license. You are not allowed to alter, modify, reverse-engineer the software or
+use the software to develop supplements which might infringe intellectual
+property rights of MA Lighting or of third parties or violate the terms and
+conditions of this license.
+
+Any installation or copy of the software shall respect and display the copyright
+of MA Lighting in the software. The software is provided to you as a whole and is
+not severable. The terms and conditions of this license shall apply therefore to
+the software as a whole and its components individually.
+
+When updating or upgrading the software on any hardware, it may or may not be
+possible to keep multiple instances of the same software version or different
+software versions. At any point in time shall the latest End User License
+Agreement supersede any other versions available on the hardware regardless of
+which version or instance of the software is used.
+
+When upgrading or updating hardware with an alternative version of the software,
+MA Lighting is not responsible for the migration of your existing data. MA
+Lighting provides the migration tools contained in the software only on a best
+effort and as is basis. MA Lighting does not warrant any compatibility of
+existing data with other versions of the software. Storing information on media
+such as hard-drives, floppy disks, solid state drives, USB storage media, CD
+ROMs or similar devices can be subject to influences beyond MA Lighting's
+control. MA Lighting does not warrant that any data stored by its software on any
+device will be readable by its software.
+
+You are not allowed to operate the licensed software in connection with
+unauthorized port nodes (imitations of the MA 2-Port, 4-Port, 8-Port nodes) or
+unauthorized hardware (like imitations of MA fader wing or MA command wing)
+which may enable the release of parameters for controlling devices without using
+original MA Lighting hardware.
+
+Any modification to the software or hardware licensed by MA Lighting - unless
+expressly permitted by the applicable laws - will terminate the license
+stipulated herein and voids any responsibility or liability unless required by
+law.
+
+You may not and you agree not to, or to enable others to, or to help others to
+copy (except as expressly permitted by this license), decompile,
+reverse-engineer, disassemble, attempt to derive the source code, decrypt,
+modify, or create derivative works of the MA Lighting software, or any part
+thereof (except as and only to the extent of any foregoing restriction is
+prohibited by applicable law or to the extent as may be permitted by licensing
+terms governing use of open source components). You agree to use the software
+in compliance with all applicable laws, including local laws and customs of the
+country or region in which you reside or in which you download or use the
+software. The software provides as its core objective control functionality for
+applications and devices that may or may not be third-party products. By
+controlling these devices or applications with the software, MA Lighting does
+not assume any liability or responsibility for such products or applications.
+MA Lighting has no express or implied obligation to provide any technical
+support and / or customer service for such third-party products or
+applications. Please contact the respective manufacturer or application vendor
+directly for questions regarding these products.
+
+MA Lighting does not assume any responsibility for compatibility or
+non-compatibility of third-party products or applications with its software.
+Where appropriate, MA Lighting might make use of certain third-party or open
+source products, applications and licenses, to which the original owner retains
+the rights pertaining to intellectual property. MA Lighting has no express or
+implied responsibility to provide support for these products, applications and
+licenses.
+
+Only acceptance of this license and compliance with its terms (see item 6)
+grants you permission to make use of the software. Thus, in case you do not
+accept the license or do not comply with its terms, using the software would
+infringe the copyright of MA Lighting and be prohibited by law.
+
+3. Transfer
+You must not rent, lease, lend, sell, redistribute or sublicense the software or
+parts thereof or modified versions of the software.
+
+4. Consent to Use of Data / Diagnostic Data
+You agree that MA Lighting and its agents may ask for, collect, maintain,
+process and use diagnostic, technical and related information, including but not
+limited to information about your hardware, system software, application
+software and peripherals to facilitate the provision of software updates,
+product support and other services to you (if any) related to the software, and
+to verify compliance with the terms of this license. MA Lighting may use this
+information, as long as it is in a form that does not personally identify you,
+to improve our products or to provide services or technologies to you.
+
+5. Services and Third-Party Materials
+You understand that by using the software, you may control other devices which
+make you encounter content that may be deemed offensive, indecent, or
+objectionable and which content may or may not be identified as having explicit
+language. Nevertheless, you agree to use the software at your sole risk and
+that MA Lighting shall have no liability to you or any third party for content
+that may be found to be offensive, indecent, or objectionable. Certain features
+may allow you to display, include or make available content, data, information,
+applications or materials from third parties ("Third-Party Materials"). By using
+the software, you acknowledge and agree that MA Lighting is not responsible for
+examining or evaluating the content, accuracy, completeness, timeliness,
+validity, copyright compliance, legality, decency, quality or any other aspect
+of such third-party materials. MA Lighting, its officers, affiliates and
+subsidiaries do not warrant or endorse and do not assume and will not have any
+liability or responsibility to you or any other person for any third-party
+materials or for any other materials, products, or services of third parties.
+Financial information displayed by any feature of the software is for general
+informational purposes only and should not be relied upon as investment advice.
+
+6. Termination
+This license is effective until terminated. Your rights under this license will
+terminate automatically or otherwise cease to be effective without notice from
+MA Lighting if you fail to comply with any term(s) of this license. Upon the
+termination of this license, you shall cease all use of the software and
+destroy all copies, full or partial, of the software under your control.
+
+7. Limited Warranty on Media
+If purchased from and delivered by MA Lighting, MA Lighting warrants the media
+on which the software is installed subject to the general warranty terms of MA
+Lighting. MA Lighting shall have the right to make good on the failure
+according to its warranty terms. MA Lighting does not warrant the software
+itself to be free from defects. Any software other than obtained from MA Lighting
+must not be installed on MA Lighting licensed hardware. Violating this term,
+will void any warranty.
+
+8. Disclaimer of Warranties
+YOU EXPRESSLY ACKNOWLEDGE AND AGREE THAT, TO THE EXTENT PERMITTED BY APPLICABLE
+LAW, USE OF THE SOFTWARE AND FUNCTIONS PERFORMED BY OR THROUGH THE SOFTWARE IS AT
+YOUR SOLE RISK AND THAT THE ENTIRE RISK AS TO SATISFACTORY QUALITY, PERFORMANCE,
+ACCURACY AND EFFORT IS WITH YOU. EXCEPT FOR THE LIMITED WARRANTY ON MEDIA SET
+FORTH ABOVE AND TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE SOFTWARE
+AND FUNCTIONS ARE PROVIDED "AS IS" AND "AS AVAILABLE", WITH ALL FAULTS AND
+WITHOUT WARRANTY OF ANY KIND, AND MA LIGHTING AND MA LIGHTING'S LICENSORS
+(COLLECTIVELY REFERRED TO AS "MA LIGHTING" FOR THE PURPOSES OF SECTIONS 8 and
+9) HEREBY DISCLAIM ALL WARRANTIES AND CONDITIONS WITH RESPECT TO THE SOFTWARE
+AND FUNCTIONS, EITHER EXPRESS, IMPLIED OR STATUTORY, INCLUDING, BUT NOT LIMITED
+TO, THE IMPLIED WARRANTIES AND / OR CONDITIONS OF MERCHANTABILITY, OF
+SATISFACTORY QUALITY, OF FITNESS FOR A PARTICULAR PURPOSE, OF ACCURACY, OF
+QUIET ENJOYMENT, AND NON-INFRINGEMENT OF THIRD-PARTY RIGHTS. MA LIGHTING DOES
+NOT WARRANT AGAINST INTERFERENCE WITH YOUR ENJOYMENT OF THE SOFTWARE AND
+FUNCTIONS, THAT THE FUNCTIONS CONTAINED IN THE SOFTWARE WILL MEET YOUR
+REQUIREMENTS, THAT THE OPERATION OF THE SOFTWARE OR FUNCTIONS WILL BE
+UNINTERRUPTED OR ERROR-FREE, THAT ANY FUNCTIONS WILL CONTINUE TO BE MADE
+AVAILABLE, THAT THE SOFTWARE OR FUNCTIONS WILL BE COMPATIBLE OR WORK WITH ANY
+THIRD-PARTY SOFTWARE, APPLICATIONS, PRODUCT OR THIRD-PARTY SERVICES, OR THAT
+DEFECTS IN THE SOFTWARE OR FUNCTIONS WILL BE CORRECTED. INSTALLATION OF THIS
+SOFTWARE MAY AFFECT THE USABILITY OF THIRD-PARTY SOFTWARE, APPLICATIONS,
+PRODUCTS OR THIRD-PARTY SERVICES. YOU FURTHER ACKNOWLEDGE THAT THE SOFTWARE AND
+FUNCTIONS ARE NOT INTENDED OR SUITABLE FOR USE IN SITUATIONS OR ENVIRONMENTS
+WHERE THE FAILURE OR TIME DELAYS OF, OR ERRORS OR INACCURACIES IN THE CONTENT,
+DATA OR INFORMATION PROVIDED BY, THE SOFTWARE OR FUNCTIONS COULD LEAD TO
+DEATH, PERSONAL INJURY, OR SEVERE PHYSICAL OR ENVIRONMENTAL DAMAGE, INCLUDING
+WITHOUT LIMITATION THE OPERATION OF NUCLEAR FACILITIES, AIRCRAFT NAVIGATION OR
+COMMUNICATION SYSTEMS, AIR TRAFFIC CONTROL, LIFE SUPPORT OR WEAPONS SYSTEMS. NO
+ORAL OR WRITTEN INFORMATION OR ADVICE GIVEN BY MA LIGHTING OR AN MA LIGHTING
+AUTHORIZED REPRESENTATIVE SHALL CREATE A WARRANTY. SHOULD THE SOFTWARE OR
+FUNCTIONS PROVE DEFECTIVE, YOU ASSUME THE ENTIRE COST OF ALL NECESSARY
+SERVICING, REPAIR OR CORRECTION. SOME JURISDICTIONS DO NOT ALLOW THE EXCLUSION
+OF IMPLIED WARRANTIES OR LIMITATIONS ON APPLICABLE STATUTORY RIGHTS OF A
+CONSUMER, SO THE ABOVE EXCLUSION AND LIMITATIONS MAY NOT APPLY TO YOU.
+
+9. Limitation of Liability
+REGARDLESS OF THE LEGAL BASIS MA LIGHTING SHALL NOT BE LIABLE FOR ANY INCIDENTAL,
+SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES WHATSOEVER, INCLUDING, WITHOUT
+LIMITATION, DAMAGES FOR LOSS OF PROFITS, LOSS OF DATA, BUSINESS INTERRUPTION OR
+ANY OTHER COMMERCIAL DAMAGES OR LOSSES, ARISING OUT OF OR RELATED TO YOUR USE OR
+INABILITY TO USE THE SOFTWARE AND SERVICES OR ANY THIRD-PARTY SOFTWARE OR
+APPLICATIONS OR PRODUCTS IN CONJUNCTION WITH THE SOFTWARE, CAUSED BY WHATEVER
+REASON AND REGARDLESS OF THE THEORY OF LIABILITY (CONTRACT, TORT OR OTHERWISE)
+AND EVEN IF MA LIGHTING HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+THIS SHALL NOT APPLY TO DAMAGES CAUSED INTENTIONALLY OR DUE TO GROSS NEGLIGENCE
+BY MA LIGHTING, ITS REPRESENTATIVES OR ITS AGENTS OR DAMAGES RESULTING FROM A
+VIOLATION OF CARDINAL OBLIGATIONS OR MAJOR CONTRACTIONAL MAIN DUTIES RESULTING
+FROM ORDINARY NEGLIGENCE WHEREBY A CARDINAL OBLIGATION IN THIS TERMS IS AN
+ESSENTIAL CONTRACTUAL OBLIGATION WHOSE VIOLATION WOULD ENDANGER THE PURPOSE OF
+THE AGREEMENT.
+
+IN CASE OF DAMAGES RESULTING FROM A VIOLATION OF CARDINAL OBLIGATIONS OR MAJOR
+CONTRACTIONAL MAIN DUTIES RESULTING FROM ORDINARY NEGLIGENCE, THE LIABILITY OF
+MA LIGHTING SHALL BE LIMITED TO DAMAGE THAT IS TYPICALLY TO BE EXPECTED.
+
+ANY EXCLUSIONS OR LIMITATION OF LIABILITY DO NOT APPLY TO DAMAGES RESULTING
+FROM INJURIES OF LIFE, BODY OR HEALTH COMMITTED BY FAULT OR IN CASE OF
+FRAUDULENT CONCEALMENT OF DEFICIENCIES.
+
+IN NO CASE MA LIGHTING SHALL BE LIABLE FOR DAMAGES RESULTING FROM IMPROPER,
+INCORRECT USE OR USE NOT IN ACCORDANCE WITH THE INTENDED PURPOSE OF THE
+SOFTWARE.
+
+WITH REGARD TO TEST VERSIONS OF THE SOFTWARE MA LIGHTING SHALL - WITHOUT ANY
+EXCEPTIONS - NOT BE LIABLE FOR ANY INCIDENTAL, SPECIAL, INDIRECT OR CONSEQUENTIAL
+DAMAGES WHATSOEVER, INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF PROFITS,
+LOSS OF DATA, BUSINESS INTERRUPTION OR ANY OTHER COMMERCIAL DAMAGES OR LOSSES,
+ARISING OUT OF OR RELATED TO YOUR USE OR INABILITY TO USE THE SOFTWARE AND
+SERVICES OR ANY THIRD-PARTY SOFTWARE OR APPLICATIONS OR PRODUCTS IN CONJUNCTION
+WITH THE SOFTWARE, HOWEVER CAUSED, REGARDLESS OF THE THEORY OF LIABILITY
+(CONTRACT, TORT OR OTHERWISE) AND EVEN IF MA LIGHTING HAS BEEN ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGES.
+
+10. Controlling Law and Severability
+This license will be governed by and construed in accordance with the laws of
+the Federal Republic of Germany, excluding its conflict of law principles. This
+license shall not be governed by the United Nations Convention on Contracts for
+the International Sale of Goods, the application of which is expressly excluded.
+If for any reason a court of competent jurisdiction finds any provision, or
+portion thereof, to be unenforceable, the remainder of this license shall
+continue in full force and effect.
+
+11. Complete Agreement and Governing Language
+This license constitutes the entire agreement between you and MA Lighting
+relating to the use of the software and supersedes all prior or contemporaneous
+understandings regarding such subject matter. No amendment to or modification
+of this license will be binding unless in writing and signed by MA Lighting.
+Any translation of this license is done for local requirements and in the event of
+a dispute between the English and any non-English versions, the English version
+of this License shall govern, to the extent not prohibited by local law in your
+jurisdiction.
+
+12. Third-Party Acknowledgments
+Portions of the software may utilize or include third-party software and other
+copyrighted material. Acknowledgments, licensing terms and disclaimers for such
+material are contained in the electronic documentation for the software and your
+use of such material is governed by their respective terms. Certain software
+libraries and other third-party software included with the MA Lighting software
+are free software and licensed under the terms of the GNU Library / Lesser
+General Public License (LGPL). You may obtain a complete machine-readable copy
+of the source code for such free software under the terms of the LGPL, without
+charge except for the cost of media, shipping, and handling, upon written
+request to MA Lighting. The LGPL software is distributed in the hope that it
+will be useful, but WITHOUT ANY WARRANTY, without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. A copy of the LGPL is
+included with the software.
+
+13. Protection and Confidentiality
+(see full PDF for trademark, design patent, utility patent and utility model listings)
+
+Full text: https://www.malighting.com/files/malighting/user_upload/Rechtstexte/EULA.pdf
