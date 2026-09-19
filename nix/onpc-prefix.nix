@@ -81,12 +81,37 @@ stdenv.mkDerivation {
       exit 1
     fi
 
-    # DXVK via the nixpkgs setup_dxvk.sh (DLL store paths baked in; no network).
-    # setup_dxvk.sh uses `fold -w $COLUMNS` under `set -u`; COLUMNS is not always
-    # set in non-interactive build environments, so provide a fallback.
-    export COLUMNS="''${COLUMNS:-80}"
-    setup_dxvk.sh install
+    # Install DXVK manually.  nixpkgs' setup_dxvk.sh can mis-detect the Wow64
+    # layout and copy the 32-bit DLLs into system32, which makes the x64 app
+    # crash with c000007b when it loads d3d11.dll.  We know the layout, so copy
+    # the right files to the right directories and set the overrides ourselves.
+    dxvk_install() {
+      local arch="$1" srcdir="$2" dstdir="$3"
+      [ -d "$dstdir" ] || mkdir -p "$dstdir"
+      for dll in d3d8.dll d3d9.dll d3d10.dll d3d10_1.dll d3d10core.dll d3d11.dll dxgi.dll; do
+        if [ -f "''${srcdir}/''${dll}" ]; then
+          if [ -f "''${dstdir}/''${dll}" ] && [ ! -f "''${dstdir}/''${dll}.old" ]; then
+            mv -f "''${dstdir}/''${dll}" "''${dstdir}/''${dll}.old"
+          fi
+          install -m 755 "''${srcdir}/''${dll}" "''${dstdir}/''${dll}"
+          wine reg add 'HKCU\Software\Wine\DllOverrides' /v "$dll" /d native /f > /dev/null
+        fi
+      done
+    }
+    dxvk_install x64 "${dxvk}/x64" "$WINEPREFIX/drive_c/windows/system32"
+    dxvk_install x32 "${dxvk}/x32" "$WINEPREFIX/drive_c/windows/syswow64"
     wineserver -w
+
+    # Verify the x64 d3d11.dll is really in system32.  A mismatch here means the
+    # app will crash on launch with STATUS_INVALID_IMAGE_FORMAT.
+    if [ "$(wc -c < "$WINEPREFIX/drive_c/windows/system32/d3d11.dll")" != "$(wc -c < "${dxvk}/x64/d3d11.dll")" ]; then
+      echo "ERROR: DXVK x64 d3d11.dll was not installed into system32" >&2
+      exit 1
+    fi
+    if [ "$(wc -c < "$WINEPREFIX/drive_c/windows/syswow64/d3d11.dll")" != "$(wc -c < "${dxvk}/x32/d3d11.dll")" ]; then
+      echo "ERROR: DXVK x32 d3d11.dll was not installed into syswow64" >&2
+      exit 1
+    fi
 
     # wintrust stub (disables signature checks) — reuse the DLLs the winema3
     # package already cross-compiles, so no mingw toolchain is needed here.

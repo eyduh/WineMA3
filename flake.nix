@@ -29,6 +29,7 @@
         onpcPrefix = pkgs.callPackage ./nix/onpc-prefix.nix {
           winema3 = wineMa3;
           xvfb = pkgs."xorg-server";
+          dxvk = pkgs.dxvk.bin;
         };
 
         # Idempotent helper: copies the prebuilt prefix into the writable XDG
