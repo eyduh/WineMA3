@@ -18,6 +18,7 @@ let
   defaultOnpcPrefix = pkgs.callPackage ./onpc-prefix.nix {
     winema3 = cfg.package;
     xvfb = pkgs."xorg-server";
+    dxvk = pkgs.dxvk.bin;
   };
 
   # Idempotent copy helper for the selected prefix package.
