@@ -17,6 +17,7 @@
 , xvfb # nixpkgs "xorg-server"; provides Xvfb (passed via callPackage in flake.nix)
 , coreutils
 , findutils
+, fontconfig
 , winema3
 , version ? "2.4.2.2"
   # Directory name grandMA3 onPC installs into, and the prefix dir name the
@@ -40,10 +41,11 @@ stdenv.mkDerivation {
   nativeBuildInputs = [
     unzip
     wineWow64Packages.full
-    dxvk # provides setup_dxvk.sh
+    dxvk # DLL output; flake.nix passes pkgs.dxvk.bin
     xvfb # provides Xvfb
     coreutils
     findutils
+    fontconfig # silence "Cannot load default config file" sandbox noise
   ];
 
   # Wine prefixes are inherently non-deterministic (timestamps, generated GUIDs),
@@ -57,6 +59,8 @@ stdenv.mkDerivation {
     export WINEDLLOVERRIDES='mscoree,mshtml='
     export DXVK_LOG_PATH="$TMPDIR"
     export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+    # Silence Wine/Fontconfig warnings about missing default config in the sandbox.
+    export FONTCONFIG_FILE="${fontconfig}/etc/fonts/fonts.conf"
     mkdir -p "$HOME"
 
     # Headless X server for wineboot / the silent installer.
