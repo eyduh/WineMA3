@@ -123,10 +123,19 @@ rec {
     export DBUS_SESSION_BUS_ADDRESS="''${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
 
     base="''${XDG_DATA_HOME:-$HOME/.local/share}/winema3"
-    prefix=$(${pkgs.coreutils}/bin/ls -d "$base"/gma3_* 2>/dev/null | ${pkgs.coreutils}/bin/sort -V | ${pkgs.coreutils}/bin/tail -1 || true)
-    if [ -z "''${prefix:-}" ]; then
-      echo "No WineMA3 prefix found under $base — run the installer first." >&2
-      exit 1
+    # If the user set a version, use it; otherwise launch the newest installed prefix.
+    if [ -n "''${WINEMA3_VERSION:-}" ]; then
+      prefix="$base/gma3_$WINEMA3_VERSION"
+      if [ ! -d "$prefix" ]; then
+        echo "No WineMA3 prefix for gma3_$WINEMA3_VERSION found under $base" >&2
+        exit 1
+      fi
+    else
+      prefix=$(${pkgs.coreutils}/bin/ls -d "$base"/gma3_* 2>/dev/null | ${pkgs.coreutils}/bin/sort -V | ${pkgs.coreutils}/bin/tail -1 || true)
+      if [ -z "''${prefix:-}" ]; then
+        echo "No WineMA3 prefix found under $base — run the installer first." >&2
+        exit 1
+      fi
     fi
     ver=$(${pkgs.coreutils}/bin/basename "$prefix")
 
