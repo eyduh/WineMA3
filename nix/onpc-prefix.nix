@@ -6,8 +6,15 @@
 # resulting derivation is unfree and embeds the proprietary software, so it
 # must NOT be served from a PUBLIC binary cache.
 #
-# Defaults target the baked-in grandMA3 onPC 2.4.2.2 Windows installer. Override
-# `src`, `version`, and `installDir` to target another release.
+# Defaults target grandMA3 onPC 2.3.2.0, the last release known to launch with
+# current nixpkgs Wine in this project. 2.4.2.2 currently crashes on startup
+# (null-pointer write in app_gma3.exe after graphics/audio init). Override
+# `installer`, `version`, and `installDir` to opt into newer releases.
+#
+# NOTE: MA Lighting's CDN URLs carry short-lived access tokens. If the default
+# fetchurl fails with a 403, obtain a fresh link from
+# https://www.malighting.com/downloads/products/ and override the `installer`
+# argument, or point it at a local file with pkgs.requireFile / path:/... .
 { lib
 , stdenv
 , fetchurl
@@ -19,15 +26,15 @@
 , findutils
 , fontconfig
 , winema3
-, version ? "2.4.2.2"
+, version ? "2.3.2.0"
   # Directory name grandMA3 onPC installs into, and the prefix dir name the
   # gma3-wine launcher looks for under $XDG_DATA_HOME/winema3/. Must match
   # installer.install_dir_name (wine_ma3/installers.py) → "gma3_<major.minor.sub>".
 , installDir ? "gma3_${lib.concatStringsSep "." (lib.take 3 (lib.splitVersion version))}"
 , installer ? fetchurl {
     name = "grandMA3_onPC_win_v${version}.zip";
-    url = "https://xom.malighting.com/xom-rest/assets/fb019be2-3317-49ff-9110-e04f2b9be5b4/content?access_token=9FKEHm7BKIFd3pJh-6OobEGYsas";
-    sha256 = "1q2kascjp4bd2pnn8g88y0xgb8034nnsbbv957g21g1nnsa6xlci";
+    url = "https://xom.malighting.com/xom-rest/assets/8cbc9bd0-a929-40a7-8c04-b273ef69f5ba/content?access_token=9uVxy2CoQ7gqXyq5Un3VyX2Cw_A";
+    sha256 = "185lgywgqs1sv8pnv5blqqx6709v1mbj8pgfqhm5dl9mqa37i10r";
   }
 }:
 

@@ -40,7 +40,7 @@ Supported setups:
 | Output | Description |
 |--------|-------------|
 | `packages.default` / `packages.winema3` | The WineMA3 package (`winema3-install`, `winema3-probe`, `winema3-uninstall` wrappers with Wine, DXVK, mingw stubs, etc. baked into `PATH`). |
-| `packages.onpc-prefix` | Prebuilt, **unfree** grandMA3 onPC 2.4.2.2 Wine prefix (built from the official MA Lighting installer). |
+| `packages.onpc-prefix` | Prebuilt, **unfree** grandMA3 onPC 2.3.2.0 Wine prefix (built from the official MA Lighting installer). |
 | `packages.winema3-install-prefix` | Idempotent helper that copies `packages.onpc-prefix` into `~/.local/share/winema3/`. |
 | `apps.default` / `apps.install` | Runs `winema3-install`. |
 | `apps.probe` | Runs `winema3-probe` (system probe, installs nothing). |
@@ -174,8 +174,15 @@ Lighting EULA explicitly:
 ```
 
 Rebuild, log out and back in (or run `winema3-install-prefix` once), and the
-prebuilt grandMA3 onPC 2.4.2.2 prefix is copied into `~/.local/share/winema3/`.
+prebuilt grandMA3 onPC 2.3.2.0 prefix is copied into `~/.local/share/winema3/`.
 Launch with `gma3-wine` or the **grandMA3 (Wine)** menu entry.
+
+> **Version note:** the declarative default is **2.3.2.0** because onPC **2.4.2.2**
+> currently crashes on startup with the nixpkgs Wine/DXVK stack on tested AMD
+> hardware (null-pointer write in `app_gma3.exe` right after graphics/audio init).
+> 2.3.2.0 launches and runs. You can still override `programs.winema3.onpcPrefix.package`
+> to install a newer release side-by-side; see the "Multiple onPC versions" tip
+> below.
 
 **Imperative** — supply the installer yourself and run `winema3-install` once:
 
@@ -405,6 +412,16 @@ with a native `gma3` launcher). It discovers the newest Wine prefix under
 ```bash
 gma3-wine
 ```
+
+To launch a specific installed version instead of the newest one, set
+`WINEMA3_VERSION` to the version triplet:
+
+```bash
+WINEMA3_VERSION=2.3.2 gma3-wine
+```
+
+This is useful when multiple onPC releases are installed side-by-side under
+`~/.local/share/winema3`.
 
 Or launch **grandMA3 (Wine)** from your application menu. In `on-demand` mode
 the menu entry runs through `winema3-wrap`, which opens the MA-Net ports for the
